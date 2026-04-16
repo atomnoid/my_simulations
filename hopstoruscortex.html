@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Scroll Reactive Cosmic Vortex</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: black; }
+  </style>
+</head>
+<body>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<script>
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000000);
+
+const camera = new THREE.PerspectiveCamera(
+  75,
+  window.innerWidth / window.innerHeight,
+  0.1,
+  1000
+);
+camera.position.z = 10;
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const R = 2.5;
+const r0 = 1;
+const segments = 200;
+
+const geometry = new THREE.BufferGeometry();
+const vertices = [];
+const colors = [];
+
+let time = 0;
+
+/* ------------------ SCROLL PHYSICS ------------------ */
+let scrollVelocity = 0;
+let scrollPower = 0;
+
+window.addEventListener("wheel", (e) => {
+  scrollVelocity += e.deltaY * 0.0008; // sensitivity
+});
+
+/* ------------------ GEOMETRY ------------------ */
+function generateGeometry(t) {
+  vertices.length = 0;
+  colors.length = 0;
+
+  for (let i = 0; i < segments; i++) {
+    for (let j = 0; j < segments; j++) {
+
+      let u = (i / segments) * Math.PI * 2;
+      let v = (j / segments) * Math.PI * 2;
+
+      // scroll energy influences distortion
+      let distortion =
+        0.3 * Math.sin(5*u + t + scrollPower*5) *
+        Math.cos(3*v + t + scrollPower*4);
+
+      let r = r0 + distortion;
+
+      let theta = u + t * 0.3 + scrollPower*2;
+
+      let x = (R + r * Math.cos(v)) * Math.cos(theta);
+      let y = (R + r * Math.cos(v)) * Math.sin(theta);
+      let z = r * Math.sin(v);
+
+      vertices.push(x, y, z);
+
+      let color = new THREE.Color();
+      color.setHSL(
+        (u/(Math.PI*2) + t*0.15 + scrollPower*0.4) % 1,
+        1,
+        0.5
+      );
+      colors.push(color.r, color.g, color.b);
+    }
+  }
+
+  geometry.setAttribute('position',
+    new THREE.Float32BufferAttribute(vertices, 3)
+  );
+
+  geometry.setAttribute('color',
+    new THREE.Float32BufferAttribute(colors, 3)
+  );
+}
+
+generateGeometry(time);
+
+const material = new THREE.PointsMaterial({
+  size: 0.05,
+  vertexColors: true
+});
+
+const points = new THREE.Points(geometry, material);
+scene.add(points);
+
+/* ------------------ ANIMATION ------------------ */
+function animate() {
+  requestAnimationFrame(animate);
+
+  // 30% faster base animation
+  time += 0.026;
+
+  // inertia physics
+  scrollPower += scrollVelocity;
+  scrollVelocity *= 0.90;  // friction
+  scrollPower *= 0.96;     // easing return
+
+  generateGeometry(time);
+
+  points.rotation.x += 0.002 + scrollPower*0.2;
+  points.rotation.y += 0.003 + scrollPower*0.25;
+
+  renderer.render(scene, camera);
+}
+
+animate();
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+
+</body>
+</html>
