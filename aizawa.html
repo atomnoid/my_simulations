@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HALVORSEN // NEURAL STRANGE ATTRACTOR</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #000;
+    overflow: hidden;
+    font-family: 'Share Tech Mono', monospace;
+    color: #00ff88;
+  }
+
+  #canvas-container {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+  }
+
+  canvas { display: block; }
+
+  /* Scanline overlay */
+  .scanlines {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.07) 2px,
+      rgba(0,0,0,0.07) 4px
+    );
+    animation: scanMove 8s linear infinite;
+  }
+
+  @keyframes scanMove {
+    0% { background-position: 0 0; }
+    100% { background-position: 0 100px; }
+  }
+
+  /* CRT vignette */
+  .vignette {
+    position: fixed;
+    inset: 0;
+    z-index: 9;
+    pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.85) 100%);
+  }
+
+  /* HUD UI */
+  .hud {
+    position: fixed;
+    z-index: 20;
+    pointer-events: none;
+  }
+
+  .hud-top-left {
+    top: 24px; left: 24px;
+  }
+
+  .hud-title {
+    font-family: 'Orbitron', monospace;
+    font-weight: 900;
+    font-size: 22px;
+    letter-spacing: 0.2em;
+    color: #00ff88;
+    text-shadow: 0 0 20px #00ff88, 0 0 40px #00ff8844;
+    line-height: 1.1;
+  }
+
+  .hud-subtitle {
+    font-size: 10px;
+    letter-spacing: 0.4em;
+    color: #00aa55;
+    margin-top: 4px;
+    text-shadow: 0 0 8px #00ff88;
+  }
+
+  .hud-line {
+    width: 200px;
+    height: 1px;
+    background: linear-gradient(90deg, #00ff88, transparent);
+    margin: 10px 0;
+    box-shadow: 0 0 8px #00ff88;
+  }
+
+  .hud-data {
+    font-size: 9px;
+    color: #007744;
+    letter-spacing: 0.15em;
+    line-height: 2;
+  }
+
+  .hud-data span {
+    color: #00ff88;
+    text-shadow: 0 0 6px #00ff88;
+  }
+
+  .hud-top-right {
+    top: 24px; right: 24px;
+    text-align: right;
+  }
+
+  .hud-corner-box {
+    border: 1px solid #00ff8822;
+    padding: 12px 16px;
+    background: rgba(0,255,136,0.03);
+    backdrop-filter: blur(2px);
+  }
+
+  .hud-corner-box::before {
+    content: '';
+    position: absolute;
+    top: -1px; left: -1px;
+    width: 12px; height: 12px;
+    border-top: 2px solid #00ff88;
+    border-left: 2px solid #00ff88;
+    box-shadow: 0 0 8px #00ff88;
+  }
+
+  .hud-corner-box::after {
+    content: '';
+    position: absolute;
+    bottom: -1px; right: -1px;
+    width: 12px; height: 12px;
+    border-bottom: 2px solid #00ff88;
+    border-right: 2px solid #00ff88;
+    box-shadow: 0 0 8px #00ff88;
+  }
+
+  .hud-corner-box { position: relative; }
+
+  .status-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    justify-content: flex-end;
+    font-size: 9px;
+    color: #007744;
+    letter-spacing: 0.15em;
+    margin-bottom: 6px;
+  }
+
+  .status-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #00ff88;
+    box-shadow: 0 0 8px #00ff88;
+    animation: blink 1.5s infinite;
+  }
+
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.2; }
+  }
+
+  .hud-bottom-left {
+    bottom: 24px; left: 24px;
+  }
+
+  .equation {
+    font-size: 10px;
+    color: #005533;
+    letter-spacing: 0.1em;
+    line-height: 2;
+    text-shadow: 0 0 4px #00ff8833;
+  }
+
+  .equation .var {
+    color: #00cc66;
+    text-shadow: 0 0 8px #00ff88;
+  }
+
+  .hud-bottom-right {
+    bottom: 24px; right: 24px;
+    text-align: right;
+  }
+
+  .neural-label {
+    font-size: 8px;
+    letter-spacing: 0.3em;
+    color: #004422;
+    line-height: 2.5;
+  }
+
+  .neural-label span {
+    color: #00aa55;
+  }
+
+  /* Corner decorations */
+  .corner-deco {
+    position: fixed;
+    z-index: 20;
+    pointer-events: none;
+    width: 60px; height: 60px;
+  }
+
+  .corner-deco svg { width: 100%; height: 100%; }
+
+  .corner-deco.tl { top: 0; left: 0; }
+  .corner-deco.tr { top: 0; right: 0; transform: scaleX(-1); }
+  .corner-deco.bl { bottom: 0; left: 0; transform: scaleY(-1); }
+  .corner-deco.br { bottom: 0; right: 0; transform: scale(-1); }
+
+  /* Glitch animation on title */
+  @keyframes glitch {
+    0%, 95%, 100% { clip-path: none; transform: none; }
+    96% { clip-path: inset(30% 0 40% 0); transform: translateX(-4px); }
+    97% { clip-path: inset(60% 0 10% 0); transform: translateX(4px); }
+    98% { clip-path: inset(10% 0 70% 0); transform: translateX(-2px); }
+    99% { clip-path: none; transform: none; }
+  }
+
+  .hud-title { animation: glitch 6s infinite; }
+
+  #counter {
+    font-family: 'Orbitron', monospace;
+    font-size: 28px;
+    font-weight: 700;
+    color: #00ff88;
+    text-shadow: 0 0 20px #00ff88;
+    letter-spacing: 0.1em;
+  }
+</style>
+</head>
+<body>
+
+<div id="canvas-container"></div>
+<div class="scanlines"></div>
+<div class="vignette"></div>
+
+<!-- Corner decorations -->
+<div class="corner-deco tl">
+  <svg viewBox="0 0 60 60" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M0 60 L0 0 L60 0" stroke="#00ff88" stroke-width="1.5" opacity="0.6"/>
+    <path d="M0 45 L0 0 L45 0" stroke="#00ff88" stroke-width="0.5" opacity="0.3"/>
+    <circle cx="0" cy="0" r="4" fill="#00ff88" opacity="0.8"/>
+  </svg>
+</div>
+<div class="corner-deco tr">
+  <svg viewBox="0 0 60 60" fill="none">
+    <path d="M0 60 L0 0 L60 0" stroke="#00ff88" stroke-width="1.5" opacity="0.6"/>
+    <path d="M0 45 L0 0 L45 0" stroke="#00ff88" stroke-width="0.5" opacity="0.3"/>
+    <circle cx="0" cy="0" r="4" fill="#00ff88" opacity="0.8"/>
+  </svg>
+</div>
+<div class="corner-deco bl">
+  <svg viewBox="0 0 60 60" fill="none">
+    <path d="M0 60 L0 0 L60 0" stroke="#00ff88" stroke-width="1.5" opacity="0.6"/>
+    <path d="M0 45 L0 0 L45 0" stroke="#00ff88" stroke-width="0.5" opacity="0.3"/>
+    <circle cx="0" cy="0" r="4" fill="#00ff88" opacity="0.8"/>
+  </svg>
+</div>
+<div class="corner-deco br">
+  <svg viewBox="0 0 60 60" fill="none">
+    <path d="M0 60 L0 0 L60 0" stroke="#00ff88" stroke-width="1.5" opacity="0.6"/>
+    <path d="M0 45 L0 0 L45 0" stroke="#00ff88" stroke-width="0.5" opacity="0.3"/>
+    <circle cx="0" cy="0" r="4" fill="#00ff88" opacity="0.8"/>
+  </svg>
+</div>
+
+<!-- HUD Elements -->
+<div class="hud hud-top-left">
+  <div class="hud-title">HALVORSEN</div>
+  <div class="hud-subtitle">STRANGE ATTRACTOR // NEURAL SYSTEM</div>
+  <div class="hud-line"></div>
+  <div class="hud-data">
+    ALPHA &nbsp;&nbsp;&nbsp; <span>1.4000</span><br>
+    POINTS &nbsp;&nbsp; <span id="pointCount">000000</span><br>
+    STREAMS &nbsp; <span>0008</span><br>
+    MODE &nbsp;&nbsp;&nbsp;&nbsp; <span>CHAOTIC</span>
+  </div>
+</div>
+
+<div class="hud hud-top-right">
+  <div class="hud-corner-box">
+    <div class="status-row">
+      <div class="status-dot"></div>
+      SYS_ONLINE
+    </div>
+    <div id="counter">0000</div>
+    <div class="neural-label">
+      NODE_COUNT<br>
+      <span>ACTIVE SYNAPSES</span>
+    </div>
+  </div>
+</div>
+
+<div class="hud hud-bottom-left">
+  <div class="equation">
+    dx/dt = <span class="var">-α·x - 4y - 4z</span><br>
+    dy/dt = <span class="var">-α·y - 4z - 4x</span><br>
+    dz/dt = <span class="var">-α·z - 4x - 4y</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="var">+ x² + y² + z²</span>
+  </div>
+</div>
+
+<div class="hud hud-bottom-right">
+  <div class="neural-label">
+    DRAG TO ROTATE<br>
+    SCROLL TO ZOOM<br>
+    <span>THREE.JS // WEBGL 2.0</span>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ============================================================
+// HALVORSEN STRANGE ATTRACTOR — Hacker Neural Network Aesthetic
+// ============================================================
+
+const ALPHA = 1.4;
+const DT = 0.005;
+const MAX_TRAIL = 800;       // points per trail
+const NUM_TRAILS = 8;        // simultaneous walkers
+const PARTICLE_COUNT = 5000; // ambient particles
+const NEURAL_NODES = 60;     // background nodes
+
+// Halvorsen equations
+function halvorsen(x, y, z, a) {
+  const dx = -a * x - 4 * y - 4 * z - y * y;
+  const dy = -a * y - 4 * z - 4 * x - z * z;
+  const dz = -a * z - 4 * x - 4 * y - x * x;
+  return [dx, dy, dz];
+}
+
+function rk4(x, y, z, a, dt) {
+  const [k1x, k1y, k1z] = halvorsen(x, y, z, a);
+  const [k2x, k2y, k2z] = halvorsen(x + k1x*dt/2, y + k1y*dt/2, z + k1z*dt/2, a);
+  const [k3x, k3y, k3z] = halvorsen(x + k2x*dt/2, y + k2y*dt/2, z + k2z*dt/2, a);
+  const [k4x, k4y, k4z] = halvorsen(x + k3x*dt, y + k3y*dt, z + k3z*dt, a);
+  return [
+    x + dt*(k1x + 2*k2x + 2*k3x + k4x)/6,
+    y + dt*(k1y + 2*k2y + 2*k3y + k4y)/6,
+    z + dt*(k1z + 2*k2z + 2*k3z + k4z)/6
+  ];
+}
+
+// Scene setup
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.01, 1000);
+camera.position.set(0, 0, 35);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setClearColor(0x000510, 1);
+document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+// Scale factor to make attractor fit nicely
+const SCALE = 1.2;
+
+// ─── TRAIL SYSTEM ───────────────────────────────────────────
+const trailColors = [
+  new THREE.Color(0x00ff88),
+  new THREE.Color(0x00ffcc),
+  new THREE.Color(0x00cc55),
+  new THREE.Color(0x44ffaa),
+  new THREE.Color(0x00ff44),
+  new THREE.Color(0x11ffaa),
+  new THREE.Color(0x00ddff),
+  new THREE.Color(0x55ff00),
+];
+
+// Initial conditions slightly different for each trail
+const trails = [];
+
+for (let t = 0; t < NUM_TRAILS; t++) {
+  const state = {
+    x: (Math.random() - 0.5) * 0.1,
+    y: (Math.random() - 0.5) * 0.1,
+    z: (Math.random() - 0.5) * 0.1,
+    positions: new Float32Array(MAX_TRAIL * 3),
+    colors: new Float32Array(MAX_TRAIL * 3),
+    count: 0,
+    head: 0,
+    color: trailColors[t],
+    filled: false,
+  };
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(state.positions, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(state.colors, 3));
+  geo.setDrawRange(0, 0);
+
+  const mat = new THREE.LineBasicMaterial({
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.85,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+
+  const line = new THREE.Line(geo, mat);
+  scene.add(line);
+
+  // Particle head for this trail
+  const headGeo = new THREE.BufferGeometry();
+  headGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(3), 3));
+  const headMat = new THREE.PointsMaterial({
+    color: state.color,
+    size: 0.3,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    sizeAttenuation: true,
+  });
+  const headPoint = new THREE.Points(headGeo, headMat);
+  scene.add(headPoint);
+
+  trails.push({ ...state, line, headPoint, headGeo });
+}
+
+// ─── AMBIENT PARTICLE FIELD ──────────────────────────────────
+const ambientGeo = new THREE.BufferGeometry();
+const ambientPos = new Float32Array(PARTICLE_COUNT * 3);
+const ambientCol = new Float32Array(PARTICLE_COUNT * 3);
+const ambientVel = new Float32Array(PARTICLE_COUNT * 3);
+
+for (let i = 0; i < PARTICLE_COUNT; i++) {
+  ambientPos[i*3+0] = (Math.random() - 0.5) * 60;
+  ambientPos[i*3+1] = (Math.random() - 0.5) * 60;
+  ambientPos[i*3+2] = (Math.random() - 0.5) * 60;
+  ambientVel[i*3+0] = (Math.random() - 0.5) * 0.002;
+  ambientVel[i*3+1] = (Math.random() - 0.5) * 0.002;
+  ambientVel[i*3+2] = (Math.random() - 0.5) * 0.002;
+  const bright = 0.1 + Math.random() * 0.3;
+  ambientCol[i*3+0] = 0;
+  ambientCol[i*3+1] = bright;
+  ambientCol[i*3+2] = bright * 0.5;
+}
+
+ambientGeo.setAttribute('position', new THREE.BufferAttribute(ambientPos, 3));
+ambientGeo.setAttribute('color', new THREE.BufferAttribute(ambientCol, 3));
+
+const ambientMat = new THREE.PointsMaterial({
+  vertexColors: true,
+  size: 0.08,
+  transparent: true,
+  opacity: 0.6,
+  blending: THREE.AdditiveBlending,
+  depthWrite: false,
+  sizeAttenuation: true,
+});
+
+const ambientParticles = new THREE.Points(ambientGeo, ambientMat);
+scene.add(ambientParticles);
+
+// ─── NEURAL NETWORK NODES ─────────────────────────────────────
+// Nodes (spheres)
+const nodePositions = [];
+const nodeGroup = new THREE.Group();
+
+for (let i = 0; i < NEURAL_NODES; i++) {
+  const pos = new THREE.Vector3(
+    (Math.random() - 0.5) * 50,
+    (Math.random() - 0.5) * 50,
+    (Math.random() - 0.5) * 50
+  );
+  nodePositions.push(pos);
+
+  const geo = new THREE.SphereGeometry(0.12, 6, 6);
+  const mat = new THREE.MeshBasicMaterial({
+    color: Math.random() > 0.7 ? 0x00ffcc : 0x003322,
+    transparent: true,
+    opacity: 0.4 + Math.random() * 0.4,
+    blending: THREE.AdditiveBlending,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.copy(pos);
+  nodeGroup.add(mesh);
+}
+
+// Neural edges
+const edgePositions = [];
+const edgeColors = [];
+
+for (let i = 0; i < NEURAL_NODES; i++) {
+  for (let j = i + 1; j < NEURAL_NODES; j++) {
+    const dist = nodePositions[i].distanceTo(nodePositions[j]);
+    if (dist < 18 && Math.random() > 0.6) {
+      edgePositions.push(
+        nodePositions[i].x, nodePositions[i].y, nodePositions[i].z,
+        nodePositions[j].x, nodePositions[j].y, nodePositions[j].z,
+      );
+      const alpha = Math.max(0, (18 - dist) / 18) * 0.3;
+      edgeColors.push(0, alpha * 0.6, alpha * 0.3, 0, alpha * 0.3, alpha * 0.15);
+    }
+  }
+}
+
+const edgeGeo = new THREE.BufferGeometry();
+edgeGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(edgePositions), 3));
+edgeGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(edgeColors), 3));
+
+const edgeMat = new THREE.LineBasicMaterial({
+  vertexColors: true,
+  transparent: true,
+  blending: THREE.AdditiveBlending,
+  depthWrite: false,
+});
+
+const neuralEdges = new THREE.LineSegments(edgeGeo, edgeMat);
+nodeGroup.add(neuralEdges);
+scene.add(nodeGroup);
+
+// ─── GRID PLANE ───────────────────────────────────────────────
+const gridHelper = new THREE.GridHelper(80, 40, 0x001a0d, 0x001a0d);
+gridHelper.material.transparent = true;
+gridHelper.material.opacity = 0.3;
+gridHelper.material.blending = THREE.AdditiveBlending;
+gridHelper.position.y = -20;
+scene.add(gridHelper);
+
+// ─── ORBIT CONTROLS (manual) ─────────────────────────────────
+let isDragging = false;
+let prevMouse = { x: 0, y: 0 };
+const rotation = { x: 0.3, y: 0 };
+const pivot = new THREE.Group();
+scene.add(pivot);
+
+// Move everything into pivot
+[...trails.map(t => t.line), ...trails.map(t => t.headPoint), ambientParticles, nodeGroup, gridHelper].forEach(obj => {
+  scene.remove(obj);
+  pivot.add(obj);
+});
+
+renderer.domElement.addEventListener('mousedown', e => { isDragging = true; prevMouse = { x: e.clientX, y: e.clientY }; });
+renderer.domElement.addEventListener('mousemove', e => {
+  if (!isDragging) return;
+  const dx = e.clientX - prevMouse.x;
+  const dy = e.clientY - prevMouse.y;
+  rotation.y += dx * 0.005;
+  rotation.x += dy * 0.005;
+  prevMouse = { x: e.clientX, y: e.clientY };
+});
+renderer.domElement.addEventListener('mouseup', () => isDragging = false);
+renderer.domElement.addEventListener('wheel', e => {
+  camera.position.z = Math.max(10, Math.min(80, camera.position.z + e.deltaY * 0.05));
+});
+
+// Touch support
+renderer.domElement.addEventListener('touchstart', e => {
+  isDragging = true;
+  prevMouse = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+});
+renderer.domElement.addEventListener('touchmove', e => {
+  if (!isDragging) return;
+  const dx = e.touches[0].clientX - prevMouse.x;
+  const dy = e.touches[0].clientY - prevMouse.y;
+  rotation.y += dx * 0.005;
+  rotation.x += dy * 0.005;
+  prevMouse = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+});
+renderer.domElement.addEventListener('touchend', () => isDragging = false);
+
+// ─── ANIMATION ───────────────────────────────────────────────
+let totalPoints = 0;
+let frame = 0;
+const STEPS_PER_FRAME = 8; // advance multiple steps per frame
+
+function updateTrail(trail) {
+  for (let s = 0; s < STEPS_PER_FRAME; s++) {
+    const [nx, ny, nz] = rk4(trail.x, trail.y, trail.z, ALPHA, DT);
+    trail.x = nx; trail.y = ny; trail.z = nz;
+
+    const idx = trail.head * 3;
+    trail.positions[idx+0] = nx * SCALE;
+    trail.positions[idx+1] = ny * SCALE;
+    trail.positions[idx+2] = nz * SCALE;
+
+    // Fade color along trail
+    const age = (trail.count < MAX_TRAIL) ? (trail.count / MAX_TRAIL) : 1;
+    trail.colors[idx+0] = trail.color.r * age;
+    trail.colors[idx+1] = trail.color.g * age;
+    trail.colors[idx+2] = trail.color.b * age;
+
+    trail.head = (trail.head + 1) % MAX_TRAIL;
+    if (trail.count < MAX_TRAIL) trail.count++;
+    if (trail.count >= MAX_TRAIL) trail.filled = true;
+    totalPoints++;
+  }
+
+  trail.line.geometry.attributes.position.needsUpdate = true;
+  trail.line.geometry.attributes.color.needsUpdate = true;
+  trail.line.geometry.setDrawRange(0, trail.count);
+
+  // Update head particle
+  const hIdx = ((trail.head - 1 + MAX_TRAIL) % MAX_TRAIL) * 3;
+  trail.headGeo.attributes.position.array[0] = trail.positions[hIdx];
+  trail.headGeo.attributes.position.array[1] = trail.positions[hIdx+1];
+  trail.headGeo.attributes.position.array[2] = trail.positions[hIdx+2];
+  trail.headGeo.attributes.position.needsUpdate = true;
+}
+
+const counterEl = document.getElementById('counter');
+const pointCountEl = document.getElementById('pointCount');
+
+function animate() {
+  requestAnimationFrame(animate);
+  frame++;
+
+  // Update trails
+  trails.forEach(t => updateTrail(t));
+
+  // Drift ambient particles slightly
+  for (let i = 0; i < PARTICLE_COUNT; i++) {
+    ambientPos[i*3+0] += ambientVel[i*3+0];
+    ambientPos[i*3+1] += ambientVel[i*3+1];
+    ambientPos[i*3+2] += ambientVel[i*3+2];
+    // Wrap
+    if (Math.abs(ambientPos[i*3+0]) > 30) ambientVel[i*3+0] *= -1;
+    if (Math.abs(ambientPos[i*3+1]) > 30) ambientVel[i*3+1] *= -1;
+    if (Math.abs(ambientPos[i*3+2]) > 30) ambientVel[i*3+2] *= -1;
+  }
+  ambientGeo.attributes.position.needsUpdate = true;
+
+  // Slow auto-rotate
+  if (!isDragging) rotation.y += 0.002;
+
+  // Neural network pulse
+  nodeGroup.children.forEach((child, i) => {
+    if (child.isMesh) {
+      child.material.opacity = 0.2 + 0.3 * Math.abs(Math.sin(frame * 0.02 + i * 0.5));
+    }
+  });
+
+  pivot.rotation.x = rotation.x;
+  pivot.rotation.y = rotation.y;
+
+  // HUD update
+  if (frame % 6 === 0) {
+    const count = trails[0].count + (trails[0].filled ? 0 : 0);
+    const total = NUM_TRAILS * MAX_TRAIL;
+    counterEl.textContent = String(Math.min(frame * NUM_TRAILS * STEPS_PER_FRAME, 999999)).padStart(6, '0').slice(-4);
+    pointCountEl.textContent = String(Math.min(totalPoints, 999999)).padStart(6, '0');
+  }
+
+  renderer.render(scene, camera);
+}
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+animate();
+</script>
+</body>
+</html>
