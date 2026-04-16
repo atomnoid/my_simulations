@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Aizawa Strange Attractor</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@1,300;1,400&family=Share+Tech+Mono&display=swap');
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{background:#000;overflow:hidden;width:100vw;height:100vh;cursor:grab;}
+  body.dragging{cursor:grabbing;}
+  canvas{display:block;position:absolute;top:0;left:0;}
+  #c-glow{z-index:1;}   /* accumulated density layer  */
+  #c-trail{z-index:2;}  /* live glowing head + trail   */
+
+  #overlay{
+    position:fixed;inset:0;pointer-events:none;z-index:10;
+  }
+  #replay-btn{
+    position:absolute;top:22px;right:22px;
+    pointer-events:all;cursor:pointer;
+    background:rgba(255,255,255,.05);border:1px solid rgba(200,160,255,.25);
+    color:rgba(200,160,255,.7);font-family:'Share Tech Mono',monospace;
+    font-size:10px;letter-spacing:.1em;padding:5px 10px;
+    text-transform:uppercase;transition:all .2s;
+  }
+  #replay-btn:hover{background:rgba(168,85,247,.2);color:#fff;}
+</style>
+</head>
+<body>
+<!-- Two layered canvases -->
+<canvas id="c-glow"></canvas>
+<canvas id="c-trail"></canvas>
+
+<div id="overlay">
+  <button id="replay-btn" onclick="replay()">↺ Replay</button>
+</div>
+
+<script>
+// ── Two canvas setup ──────────────────────────────────────────────────────────
+const cGlow  = document.getElementById('c-glow');
+const cTrail = document.getElementById('c-trail');
+const gCtx   = cGlow.getContext('2d');
+const tCtx   = cTrail.getContext('2d');
+let W, H;
+
+function resize() {
+  W = cGlow.width = cTrail.width  = window.innerWidth;
+  H = cGlow.height= cTrail.height = window.innerHeight;
+  allocBuffers();
+}
+
+// ── Aizawa parameters ─────────────────────────────────────────────────────────
+const A=0.95, B=0.7, C=0.6, D=3.5, E=0.25, F=0.1, DT=0.003;
+
+function step(x,y,z){
+  return [
+    x + ((z-B)*x - D*y)*DT,
+    y + (D*x + (z-B)*y)*DT,
+    z + (C + A*z - z*z*z/3 - (x*x+y*y)*(1+E*z) + F*z*x*x*x)*DT
+  ];
+}
+
+// ── Simulation state ──────────────────────────────────────────────────────────
+const MAX_PTS = 1_200_000;
+const pts     = new Float32Array(MAX_PTS * 3);
+let ptCount = 0, writeHead = 0;
+let hx = 0.1, hy = 0.0, hz = 0.0; // head position
+
+// Trail ring-buffer for glowing head
+const TRAIL_LEN = 1800;
+const trail     = new Float32Array(TRAIL_LEN * 3);
+let trailHead   = 0, trailCount = 0;
+
+// Phase control
+const FORMING_STEPS = MAX_PTS;     // steps until fully formed
+const PTS_PER_FRAME_MIN = 800;
+const PTS_PER_FRAME_MAX = 6000;
+let forming = true;
+let formProgress = 0;              // 0→1
+
+// Discard transient
+function discardTransient(){
+  let x=0.1,y=0,z=0;
+  for(let i=0;i<6000;i++) [x,y,z]=step(x,y,z);
+  hx=x; hy=y; hz=z;
+}
+
+function replay(){
+  ptCount=0; writeHead=0; trailHead=0; trailCount=0;
+  formProgress=0; forming=true;
+  discardTransient();
+  density.fill(0); maxDensity=1;
+}
+
+// ── Rotation & zoom ───────────────────────────────────────────────────────────
+let rotX=0.35, rotY=0.0, autoRotating=true;
+let dragging=false, lastMX=0, lastMY=0;
+let zoom=1.0;
+
+cTrail.addEventListener('mousedown', e=>{
+  dragging=true; lastMX=e.clientX; lastMY=e.clientY;
+  document.body.classList.add('dragging'); autoRotating=false;
+});
+window.addEventListener('mouseup',()=>{
+  dragging=false; document.body.classList.remove('dragging');
+  setTimeout(()=>autoRotating=true,2500);
+});
+window.addEventListener('mousemove', e=>{
+  if(!dragging) return;
+  rotY+=(e.clientX-lastMX)*0.007;
+  rotX+=(e.clientY-lastMY)*0.007;
+  rotX=Math.max(-Math.PI/2,Math.min(Math.PI/2,rotX));
+  lastMX=e.clientX; lastMY=e.clientY;
+});
+let lastTX=0,lastTY=0;
+cTrail.addEventListener('touchstart',e=>{
+  autoRotating=false; lastTX=e.touches[0].clientX; lastTY=e.touches[0].clientY;
+},{passive:true});
+cTrail.addEventListener('touchmove',e=>{
+  rotY+=(e.touches[0].clientX-lastTX)*0.008;
+  rotX+=(e.touches[0].clientY-lastTY)*0.008;
+  rotX=Math.max(-Math.PI/2,Math.min(Math.PI/2,rotX));
+  lastTX=e.touches[0].clientX; lastTY=e.touches[0].clientY;
+},{passive:true});
+cTrail.addEventListener('touchend',()=>setTimeout(()=>autoRotating=true,2500));
+window.addEventListener('wheel',e=>{
+  zoom*=e.deltaY>0?0.92:1.08;
+  zoom=Math.max(0.15,Math.min(8,zoom));
+},{passive:true});
+
+// ── Projection ────────────────────────────────────────────────────────────────
+function project(x,y,z,rx,ry,sc){
+  let y1= y*Math.cos(rx)-z*Math.sin(rx);
+  let z1= y*Math.sin(rx)+z*Math.cos(rx);
+  let x2= x*Math.cos(ry)+z1*Math.sin(ry);
+  let z2=-x*Math.sin(ry)+z1*Math.cos(ry);
+  const fov=4.5, p=fov/(fov+z2*0.3);
+  return [W/2+x2*sc*p, H/2-y1*sc*p];
+}
+
+// ── Density buffer ────────────────────────────────────────────────────────────
+let density, imgData, buf32, maxDensity=1;
+
+function allocBuffers(){
+  density  = new Float32Array(W*H);
+  imgData  = gCtx.createImageData(W,H);
+  buf32    = new Uint32Array(imgData.data.buffer);
+  maxDensity=1;
+}
+
+function densityColor(d,maxD){
+  if(d<=0) return 0;
+  const t=Math.pow(Math.log1p(d)/Math.log1p(maxD), 0.52);
+  let r,g,b;
+  if(t<0.22){const f=t/0.22; r=18*f; g=0; b=38*f;}
+  else if(t<0.48){const f=(t-0.22)/0.26; r=18+108*f; g=8*f; b=38+125*f;}
+  else if(t<0.76){const f=(t-0.48)/0.28; r=126+82*f; g=8+85*f; b=163+58*f;}
+  else{const f=(t-0.76)/0.24; r=208+47*f; g=93+162*f; b=221+34*f;}
+  return (255<<24)|(Math.min(255,b|0)<<16)|(Math.min(255,g|0)<<8)|(Math.min(255,r|0));
+}
+
+let lastPhaseIdx=-1;
+function checkPhase(p){} // no-op, UI removed
+
+// ── Main loop ─────────────────────────────────────────────────────────────────
+// We keep a "dirty rotation" flag so we re-project everything on rotation change
+let lastRX=rotX, lastRY=rotY, rotDirty=false;
+
+function render(){
+  requestAnimationFrame(render);
+
+  if(autoRotating) rotY+=0.0022;
+
+  const sc = Math.min(W,H)*0.185*zoom;
+  const rx=rotX, ry=rotY;
+
+  // Detect rotation change
+  if(Math.abs(rx-lastRX)+Math.abs(ry-lastRY)>0.003){
+    rotDirty=true; lastRX=rx; lastRY=ry;
+  }
+
+  // How many new points this frame (accelerate as attractor grows)
+  const ease = forming
+    ? Math.floor(PTS_PER_FRAME_MIN + (PTS_PER_FRAME_MAX-PTS_PER_FRAME_MIN)*Math.pow(formProgress,0.6))
+    : PTS_PER_FRAME_MAX;
+
+  // Step simulation
+  for(let i=0;i<ease;i++){
+    [hx,hy,hz]=step(hx,hy,hz);
+
+    // Store in ring buffer
+    const idx=writeHead*3;
+    pts[idx]=hx; pts[idx+1]=hy; pts[idx+2]=hz;
+    writeHead=(writeHead+1)%MAX_PTS;
+    if(ptCount<MAX_PTS) ptCount++;
+
+    // Trail
+    const ti=trailHead*3;
+    trail[ti]=hx; trail[ti+1]=hy; trail[ti+2]=hz;
+    trailHead=(trailHead+1)%TRAIL_LEN;
+    if(trailCount<TRAIL_LEN) trailCount++;
+  }
+
+  if(forming){
+    formProgress=ptCount/FORMING_STEPS;
+    if(ptCount>=FORMING_STEPS){ forming=false; formProgress=1; }
+  }
+
+  // ── Density layer (c-glow) ────────────────────────────────────────────────
+  // Rebuild density every frame — cheaper than selective invalidation
+  density.fill(0); maxDensity=1;
+
+  const total=ptCount;
+  for(let i=0;i<total;i++){
+    const idx=i*3;
+    const [sx,sy]=project(pts[idx],pts[idx+1],pts[idx+2],rx,ry,sc);
+    const px=sx|0, py=sy|0;
+    if(px<0||px>=W||py<0||py>=H) continue;
+    const di=py*W+px;
+    density[di]+=1;
+    if(density[di]>maxDensity) maxDensity=density[di];
+  }
+
+  const len=W*H;
+  for(let i=0;i<len;i++) buf32[i]=densityColor(density[i],maxDensity);
+  gCtx.putImageData(imgData,0,0);
+
+  // ── Trail layer (c-trail) ─────────────────────────────────────────────────
+  tCtx.clearRect(0,0,W,H);
+
+  // Draw trail as gradient strokes — older=dim, newer=bright
+  const tc=trailCount, tLen=Math.min(tc,TRAIL_LEN);
+  if(tLen>1){
+    // Draw in segments, newest last (brightest on top)
+    const SEG=6;
+    for(let i=SEG;i<tLen;i+=SEG){
+      const age=i/tLen;       // 0=new, 1=old
+      const alpha=Math.pow(1-age,1.8)*0.92;
+      const size=Math.pow(1-age,1.2)*3.8+0.4;
+
+      // Get point index from ring buffer (trailHead is newest)
+      const ri=((trailHead - i - 1 + TRAIL_LEN)%TRAIL_LEN)*3;
+      const ri2=((trailHead - i - SEG - 1 + TRAIL_LEN)%TRAIL_LEN)*3;
+
+      const [sx,sy] =project(trail[ri], trail[ri+1], trail[ri+2], rx,ry,sc);
+      const [sx2,sy2]=project(trail[ri2],trail[ri2+1],trail[ri2+2],rx,ry,sc);
+
+      // Lerp color: hot white → violet → deep purple
+      const hot=Math.pow(1-age,2.5);
+      const cr=(200+55*hot)|0, cg=(50+205*hot)|0, cb=255;
+      tCtx.strokeStyle=`rgba(${cr},${cg},${cb},${alpha})`;
+      tCtx.lineWidth=size;
+      tCtx.lineCap='round';
+      tCtx.shadowBlur=size*4;
+      tCtx.shadowColor=`rgba(${cr},${cg},${cb},${alpha*0.6})`;
+      tCtx.beginPath();
+      tCtx.moveTo(sx,sy);
+      tCtx.lineTo(sx2,sy2);
+      tCtx.stroke();
+    }
+  }
+
+  // Bright head dot
+  const [hsx,hsy]=project(hx,hy,hz,rx,ry,sc);
+  const headGrad=tCtx.createRadialGradient(hsx,hsy,0,hsx,hsy,14);
+  headGrad.addColorStop(0,'rgba(255,255,255,1)');
+  headGrad.addColorStop(0.25,'rgba(220,180,255,0.9)');
+  headGrad.addColorStop(0.6,'rgba(150,80,255,0.4)');
+  headGrad.addColorStop(1,'rgba(80,0,180,0)');
+  tCtx.shadowBlur=0;
+  tCtx.fillStyle=headGrad;
+  tCtx.beginPath();
+  tCtx.arc(hsx,hsy,14,0,Math.PI*2);
+  tCtx.fill();
+
+  // Inner bright core
+  tCtx.fillStyle='rgba(255,255,255,0.95)';
+  tCtx.beginPath();
+  tCtx.arc(hsx,hsy,2.5,0,Math.PI*2);
+  tCtx.fill();
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+window.addEventListener('resize', resize);
+resize();
+discardTransient();
+requestAnimationFrame(render);
+</script>
+</body>
+</html>
