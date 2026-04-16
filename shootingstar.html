@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Star Trails</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; overflow: hidden; width: 100vw; height: 100vh; }
+  #bg      { position: fixed; top: 0; left: 0; z-index: 0; }
+  #c       { position: fixed; top: 0; left: 0; z-index: 1; }
+  #overlay { position: fixed; top: 0; left: 0; pointer-events: none; z-index: 2; }
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<canvas id="c"></canvas>
+<canvas id="overlay"></canvas>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ─── utils ───────────────────────────────────────────────────────────
+function rand(a,b){ return a + Math.random()*(b-a); }
+function rInt(a,b){ return Math.floor(rand(a,b+1)); }
+const W = ()=>window.innerWidth, H = ()=>window.innerHeight;
+
+// ═══════════════════════════════════════════════════════════════════
+//  LAYER 1 – Background canvas  (sky gradient + nebula + static stars)
+// ═══════════════════════════════════════════════════════════════════
+const bgC   = document.getElementById('bg');
+const bgCtx = bgC.getContext('2d');
+
+function drawBg(){
+  const w=W(), h=H();
+  bgC.width=w; bgC.height=h;
+  const ctx=bgCtx;
+
+  // ── Deep night-sky gradient ──────────────────────────────────────
+  const sky = ctx.createLinearGradient(0,0,0,h);
+  sky.addColorStop(0.00,'#000208');
+  sky.addColorStop(0.20,'#010b1c');
+  sky.addColorStop(0.50,'#021020');
+  sky.addColorStop(0.80,'#031525');
+  sky.addColorStop(1.00,'#010d1a');
+  ctx.fillStyle=sky; ctx.fillRect(0,0,w,h);
+
+  // ── Milky-Way luminous band (diagonal) ──────────────────────────
+  const mwAngle = Math.PI*0.32;
+  const mwCx=w*0.48, mwCy=h*0.46;
+  const bw=w*1.3, bh=h*0.36;
+  ctx.save();
+  ctx.translate(mwCx,mwCy);
+  ctx.rotate(-mwAngle);
+  const mw = ctx.createRadialGradient(0,0,0,0,0,Math.max(bw,bh)*0.55);
+  mw.addColorStop(0,  'rgba(14,28,90,0.28)');
+  mw.addColorStop(0.3,'rgba(8,18,65,0.18)');
+  mw.addColorStop(0.6,'rgba(4,10,40,0.09)');
+  mw.addColorStop(1,  'rgba(0,0,0,0)');
+  ctx.scale(bw/Math.max(bw,bh), bh/Math.max(bw,bh));
+  ctx.fillStyle=mw;
+  ctx.beginPath();
+  ctx.arc(0,0,Math.max(bw,bh)*0.55,0,Math.PI*2);
+  ctx.fill();
+  ctx.restore();
+
+  // ── Nebula cloud blobs ───────────────────────────────────────────
+  const nebulae=[
+    {x:w*.22,y:h*.28,rx:w*.28,ry:h*.18,c:'rgba(12,25,95,0.22)'},
+    {x:w*.60,y:h*.18,rx:w*.20,ry:h*.14,c:'rgba(8,20,75,0.18)'},
+    {x:w*.72,y:h*.58,rx:w*.24,ry:h*.16,c:'rgba(6,17,65,0.16)'},
+    {x:w*.14,y:h*.68,rx:w*.18,ry:h*.13,c:'rgba(10,22,80,0.14)'},
+    {x:w*.50,y:h*.78,rx:w*.30,ry:h*.10,c:'rgba(14,28,90,0.16)'},
+    {x:w*.38,y:h*.44,rx:w*.16,ry:h*.12,c:'rgba(18,14,65,0.10)'},
+    {x:w*.85,y:h*.35,rx:w*.15,ry:h*.18,c:'rgba(7,18,70,0.13)'},
+  ];
+  nebulae.forEach(n=>{
+    ctx.save();
+    const g=ctx.createRadialGradient(n.x,n.y,0,n.x,n.y,1);
+    g.addColorStop(0,n.c);
+    g.addColorStop(1,'rgba(0,0,0,0)');
+    // draw as filled ellipse using scale trick
+    ctx.beginPath();
+    ctx.ellipse(n.x,n.y,n.rx,n.ry,-0.4,0,Math.PI*2);
+    const eg=ctx.createRadialGradient(n.x,n.y,0,n.x,n.y,Math.max(n.rx,n.ry));
+    eg.addColorStop(0,n.c);
+    const mid=n.c.replace(/[\d.]+\)$/,'0.06)');
+    eg.addColorStop(0.5,mid);
+    eg.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=eg;
+    ctx.fill();
+    ctx.restore();
+  });
+
+  // ── Background star field ────────────────────────────────────────
+  const count = Math.floor(w*h/900);
+  for(let i=0;i<count;i++){
+    const x=rand(0,w), y=rand(0,h);
+    const r=rand(0.15,0.95);
+    const a=rand(0.1,0.85);
+    // Color: mostly cool-white, rare warm
+    const warm=Math.random()<0.07;
+    const hue=warm?rand(30,55):rand(195,225);
+    const sat=warm?rand(40,70):rand(0,35);
+    ctx.save();
+    ctx.globalAlpha=a;
+    ctx.fillStyle=`hsl(${hue},${sat}%,${rand(75,100)}%)`;
+    ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+    // soft glow on bigger stars
+    if(r>0.65&&Math.random()<0.4){
+      const gr=ctx.createRadialGradient(x,y,0,x,y,r*6);
+      gr.addColorStop(0,`rgba(180,210,255,${a*0.35})`);
+      gr.addColorStop(1,'rgba(0,0,0,0)');
+      ctx.fillStyle=gr;
+      ctx.beginPath(); ctx.arc(x,y,r*6,0,Math.PI*2); ctx.fill();
+    }
+  }
+
+  // ── Bright stars with diffraction spikes ────────────────────────
+  for(let i=0;i<22;i++){
+    const x=rand(0,w), y=rand(0,h);
+    const r=rand(1.1,2.4), a=rand(0.65,1.0);
+    ctx.save();
+    ctx.globalAlpha=a;
+    ctx.fillStyle='#ffffff';
+    ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+    // halo
+    const gh=ctx.createRadialGradient(x,y,0,x,y,r*10);
+    gh.addColorStop(0,`rgba(210,230,255,${a*0.55})`);
+    gh.addColorStop(0.25,`rgba(160,195,255,${a*0.15})`);
+    gh.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=gh;
+    ctx.beginPath(); ctx.arc(x,y,r*10,0,Math.PI*2); ctx.fill();
+    // cross spike
+    ctx.save();
+    ctx.globalAlpha=a*0.28;
+    ctx.strokeStyle='rgba(230,242,255,0.7)';
+    ctx.lineWidth=0.6;
+    ctx.beginPath();
+    ctx.moveTo(x-r*14,y); ctx.lineTo(x+r*14,y);
+    ctx.moveTo(x,y-r*14); ctx.lineTo(x,y+r*14);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+drawBg();
+
+
+// ═══════════════════════════════════════════════════════════════════
+//  LAYER 2 – Three.js  (star trails + shooting stars, transparent)
+// ═══════════════════════════════════════════════════════════════════
+const threeC = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({canvas:threeC, antialias:true, alpha:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(W(),H());
+renderer.setClearColor(0x000000,0);
+
+const scene  = new THREE.Scene();
+const camera = new THREE.OrthographicCamera(-W()/2,W()/2,H()/2,-H()/2,0.1,1000);
+camera.position.z=10;
+
+// Trail direction (matching photo: ~48° diagonal, top-left → bottom-right)
+const ADEG=48, ARAD=ADEG*Math.PI/180;
+const DX=Math.cos(ARAD), DY=-Math.sin(ARAD);
+
+const TCOLORS=[0xffffff,0xeef4ff,0xddeeff,0xcce6ff,0xe8f0ff,0xf5faff,0xb8d8ff,0xd0e8ff];
+
+// ── Long-exposure star trail ─────────────────────────────────────
+class StarTrail{
+  constructor(init){ this.reset(init); this._build(); }
+  reset(init=false){
+    this.speed  = rand(0.25,1.3);
+    this.length = rand(25,230);
+    this.alpha  = rand(0.08,0.88);
+    this.color  = TCOLORS[rInt(0,TCOLORS.length-1)];
+    const w=W(),h=H();
+    if(init){
+      this.x=rand(-w*.75,w*.75); this.y=rand(-h*.75,h*.75);
+      const off=rand(0,this.length);
+      this.x-=DX*off; this.y-=DY*off;
+    } else {
+      if(Math.random()<0.5){ this.x=rand(-w*.8,w*.8); this.y=-h/2-60; }
+      else{ this.x=-w/2-60; this.y=rand(-h*.7,h*.7); }
+    }
+  }
+  _build(){
+    const geo=new THREE.BufferGeometry();
+    geo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(6),3));
+    geo.setAttribute('color',   new THREE.BufferAttribute(new Float32Array(6),3));
+    this.line=new THREE.Line(geo,new THREE.LineBasicMaterial({vertexColors:true,transparent:true}));
+    scene.add(this.line); this._write();
+  }
+  _write(){
+    const p=this.line.geometry.attributes.position.array;
+    const c=this.line.geometry.attributes.color.array;
+    const col=new THREE.Color(this.color);
+    p[0]=this.x-DX*this.length; p[1]=this.y-DY*this.length; p[2]=0;
+    p[3]=this.x; p[4]=this.y; p[5]=0;
+    c[0]=c[1]=c[2]=0;
+    c[3]=col.r*this.alpha; c[4]=col.g*this.alpha; c[5]=col.b*this.alpha;
+    this.line.geometry.attributes.position.needsUpdate=true;
+    this.line.geometry.attributes.color.needsUpdate=true;
+  }
+  update(){
+    this.x+=DX*this.speed; this.y+=DY*this.speed;
+    this._write();
+    const w=W(),h=H();
+    if(this.x>w/2+260||this.y<-h/2-260){ this.reset(false); this._write(); }
+  }
+}
+
+// ── Fast shooting star (bright, long, fades in/out) ─────────────
+class ShootingStar{
+  constructor(init){ this.reset(init); this._build(); }
+  reset(init=false){
+    const adeg=rand(30,65), arad=adeg*Math.PI/180;
+    this.dx=Math.cos(arad); this.dy=-Math.sin(arad);
+    this.speed  = rand(7,22);
+    this.length = rand(100,420);
+    this.alpha  = rand(0.55,1.0);
+    this.color  = TCOLORS[rInt(0,2)];
+    this.life   = rand(50,160);
+    this.age    = init ? rand(0,this.life) : 0;
+    this.fi=10; this.fo=22;
+    const w=W(),h=H();
+    if(init){
+      // Scatter all over the full screen at startup
+      this.x=rand(-w*.5,w*.5); this.y=rand(-h*.5,h*.5);
+    } else {
+      // Spawn from ALL four edges so trails appear everywhere
+      const side=Math.random();
+      if(side<0.40){
+        // Top edge — full width
+        this.x=rand(-w*.5,w*.5); this.y=-h/2-rand(10,80);
+      } else if(side<0.65){
+        // Left edge
+        this.x=-w/2-rand(10,80); this.y=rand(-h*.5,h*.5);
+      } else if(side<0.85){
+        // Right edge
+        this.x=w/2+rand(10,80); this.y=rand(-h*.5,h*.5);
+      } else {
+        // Bottom edge (some trails can come from below too)
+        this.x=rand(-w*.5,w*.5); this.y=h/2+rand(10,80);
+      }
+    }
+  }
+  _build(){
+    const mk=()=>{
+      const geo=new THREE.BufferGeometry();
+      geo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(6),3));
+      geo.setAttribute('color',   new THREE.BufferAttribute(new Float32Array(6),3));
+      const l=new THREE.Line(geo,new THREE.LineBasicMaterial({vertexColors:true,transparent:true}));
+      scene.add(l); return l;
+    };
+    this.core=mk(); this.glow=mk();
+    this._write();
+  }
+  _write(){
+    let op=this.alpha;
+    if(this.age<this.fi) op*=this.age/this.fi;
+    if(this.age>this.life-this.fo) op*=(this.life-this.age)/this.fo;
+    op=Math.max(0,op);
+    const col=new THREE.Color(this.color);
+    const write=(line,am,perp=0)=>{
+      const ox=this.dy*perp, oy=this.dx*perp;
+      const p=line.geometry.attributes.position.array;
+      const c=line.geometry.attributes.color.array;
+      p[0]=this.x-this.dx*this.length+ox; p[1]=this.y-this.dy*this.length+oy; p[2]=0;
+      p[3]=this.x+ox; p[4]=this.y+oy; p[5]=0;
+      c[0]=c[1]=c[2]=0;
+      c[3]=col.r*op*am; c[4]=col.g*op*am; c[5]=col.b*op*am;
+      line.geometry.attributes.position.needsUpdate=true;
+      line.geometry.attributes.color.needsUpdate=true;
+    };
+    write(this.core,1.0,0);
+    write(this.glow,0.22,1.2);
+  }
+  update(){
+    this.x+=this.dx*this.speed; this.y+=this.dy*this.speed; this.age++;
+    this._write();
+    if(this.age>=this.life){ this.reset(false); this._write(); }
+  }
+}
+
+// ── Spawn objects ─────────────────────────────────────────────────
+const TRAIL_N   = 320;
+const SHOOT_N   = 95;
+const trails    = Array.from({length:TRAIL_N},   ()=>new StarTrail(true));
+const shoots    = Array.from({length:SHOOT_N},   ()=>new ShootingStar(true));
+
+
+// ═══════════════════════════════════════════════════════════════════
+//  LAYER 3 – Vignette + atmosphere overlay
+// ═══════════════════════════════════════════════════════════════════
+const ovC  = document.getElementById('overlay');
+function drawOverlay(){
+  const w=W(),h=H();
+  ovC.width=w; ovC.height=h;
+  const ctx=ovC.getContext('2d');
+  ctx.clearRect(0,0,w,h);
+
+  // Vignette
+  const vg=ctx.createRadialGradient(w/2,h/2,h*.12,w/2,h/2,h*.92);
+  vg.addColorStop(0,'rgba(0,0,0,0)');
+  vg.addColorStop(0.55,'rgba(0,2,12,0.08)');
+  vg.addColorStop(1,'rgba(0,3,18,0.75)');
+  ctx.fillStyle=vg; ctx.fillRect(0,0,w,h);
+
+  // Blue atmospheric scatter in center
+  const ag=ctx.createRadialGradient(w*.43,h*.43,0,w*.43,h*.43,h*.52);
+  ag.addColorStop(0,'rgba(4,14,55,0.10)');
+  ag.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=ag; ctx.fillRect(0,0,w,h);
+
+  // Subtle film-grain dots
+  for(let i=0;i<2200;i++){
+    ctx.fillStyle=`rgba(140,175,255,${rand(0.005,0.04)})`;
+    ctx.fillRect(rand(0,w),rand(0,h),1,1);
+  }
+}
+drawOverlay();
+
+
+// ═══════════════════════════════════════════════════════════════════
+//  ANIMATE
+// ═══════════════════════════════════════════════════════════════════
+(function animate(){
+  requestAnimationFrame(animate);
+  trails.forEach(t=>t.update());
+  shoots.forEach(s=>s.update());
+  renderer.render(scene,camera);
+})();
+
+// ═══════════════════════════════════════════════════════════════════
+//  RESIZE
+// ═══════════════════════════════════════════════════════════════════
+window.addEventListener('resize',()=>{
+  renderer.setSize(W(),H());
+  camera.left=-W()/2; camera.right=W()/2;
+  camera.top=H()/2;   camera.bottom=-H()/2;
+  camera.updateProjectionMatrix();
+  drawBg(); drawOverlay();
+});
+</script>
+</body>
+</html>
