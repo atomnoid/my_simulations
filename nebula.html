@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nebula</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#000; overflow:hidden; cursor:crosshair; }
+canvas { display:block; }
+</style>
+</head>
+<body>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const scene  = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 5000);
+camera.position.set(0, 30, 220);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.setClearColor(0x000005);
+document.body.appendChild(renderer.domElement);
+
+// ═══════════════════════════════════════════════════════════
+//  SKYBOX — painted deep space on a giant sphere interior
+//  14,000+ tiny stars + Milky Way density band baked in
+// ═══════════════════════════════════════════════════════════
+(function buildSky() {
+  const W = 4096, H = 2048;
+  const c   = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const ctx = c.getContext('2d');
+
+  // Deep space base
+  ctx.fillStyle = '#00000c';
+  ctx.fillRect(0, 0, W, H);
+
+  // Milky Way band
+  const bands = [
+    { gx1:0, gy1:H*0.18, gx2:W, gy2:H*0.82, col:[8,5,22],  a:0.40 },
+    { gx1:0, gy1:H*0.28, gx2:W, gy2:H*0.72, col:[14,8,32], a:0.32 },
+    { gx1:0, gy1:H*0.36, gx2:W, gy2:H*0.64, col:[20,11,44],a:0.22 },
+  ];
+  bands.forEach(({ gx1,gy1,gx2,gy2, col:[r,g,b], a }) => {
+    const grd = ctx.createLinearGradient(gx1,gy1,gx2,gy2);
+    grd.addColorStop(0,    'rgba(0,0,0,0)');
+    grd.addColorStop(0.22, `rgba(${r},${g},${b},${a})`);
+    grd.addColorStop(0.50, `rgba(${r+5},${g+3},${b+10},${a*1.4})`);
+    grd.addColorStop(0.78, `rgba(${r},${g},${b},${a})`);
+    grd.addColorStop(1,    'rgba(0,0,0,0)');
+    ctx.fillStyle = grd; ctx.fillRect(0,0,W,H);
+  });
+
+  // Faint nebula tints on skybox
+  [[W*.14,H*.30,380, 16,4,44,0.10],[W*.50,H*.52,300,14,3,36,0.09],
+   [W*.82,H*.38,250, 18,5,48,0.08],[W*.34,H*.68,200, 9,2,28,0.07],
+   [W*.67,H*.20,220, 22,7,52,0.08],[W*.48,H*.48,260,75,18,75,0.07]
+  ].forEach(([x,y,rad,r,g,b,a]) => {
+    const grd=ctx.createRadialGradient(x,y,0,x,y,rad);
+    grd.addColorStop(0,  `rgba(${r},${g},${b},${a})`);
+    grd.addColorStop(0.55,`rgba(${r},${g},${b},${a*.28})`);
+    grd.addColorStop(1,  'rgba(0,0,0,0)');
+    ctx.fillStyle=grd; ctx.beginPath(); ctx.arc(x,y,rad,0,Math.PI*2); ctx.fill();
+  });
+
+  // Paint stars directly
+  function star(x,y,rad,r,g,b,a) {
+    const grd=ctx.createRadialGradient(x,y,0,x,y,rad);
+    grd.addColorStop(0,  `rgba(${r},${g},${b},${a})`);
+    grd.addColorStop(0.25,`rgba(${r},${g},${b},${a*.75})`);
+    grd.addColorStop(1,  `rgba(${r},${g},${b},0)`);
+    ctx.fillStyle=grd; ctx.beginPath(); ctx.arc(x,y,rad,0,Math.PI*2); ctx.fill();
+  }
+
+  // 16,000 faint dust stars
+  for (let i=0;i<16000;i++) {
+    const x=Math.random()*W, y=Math.random()*H;
+    const t=Math.random();
+    let r=215,g=222,b=255;
+    if(t<.18){r=255;g=238;b=195;}
+    else if(t<.32){r=195;g=210;b=255;}
+    else if(t<.38){r=255;g=195;b=208;}
+    star(x,y,0.35+Math.random()*.75,r,g,b,0.40+Math.random()*.50);
+  }
+
+  // 5,000 medium stars
+  for (let i=0;i<5000;i++) {
+    const x=Math.random()*W, y=Math.random()*H;
+    const t=Math.random();
+    let r=240,g=244,b=255;
+    if(t<.22){r=255;g=242;b=208;}
+    else if(t<.40){r=205;g=222;b=255;}
+    else if(t<.48){r=255;g=205;b=215;}
+    star(x,y,0.85+Math.random()*1.3,r,g,b,0.58+Math.random()*.38);
+  }
+
+  // 1000 bright stars with diffraction
+  for (let i=0;i<1000;i++) {
+    const x=Math.random()*W, y=Math.random()*H;
+    const t=Math.random();
+    let r=255,g=255,b=255;
+    if(t<.28){r=255;g=238;b=192;}
+    else if(t<.50){r=192;g=212;b=255;}
+    else if(t<.60){r=255;g=208;b=218;}
+    const rad=1.4+Math.random()*2.8;
+    star(x,y,rad,r,g,b,0.88+Math.random()*.12);
+    if(rad>2.8) {
+      ctx.strokeStyle=`rgba(${r},${g},${b},0.22)`;
+      ctx.lineWidth=0.5;
+      ctx.beginPath();ctx.moveTo(x-rad*5,y);ctx.lineTo(x+rad*5,y);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(x,y-rad*5);ctx.lineTo(x,y+rad*5);ctx.stroke();
+      // diagonal spikes
+      ctx.strokeStyle=`rgba(${r},${g},${b},0.12)`;
+      ctx.beginPath();ctx.moveTo(x-rad*3,y-rad*3);ctx.lineTo(x+rad*3,y+rad*3);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(x+rad*3,y-rad*3);ctx.lineTo(x-rad*3,y+rad*3);ctx.stroke();
+    }
+  }
+
+  // Dense Milky Way core cluster
+  for (let i=0;i<4000;i++) {
+    const cx=W*.49+(Math.random()-.5)*W*.28;
+    const cy=H*.50+(Math.random()-.5)*H*.32;
+    star(cx,cy,0.28+Math.random()*.6,
+      225+Math.floor(Math.random()*30),
+      228+Math.floor(Math.random()*22),
+      255, 0.28+Math.random()*.52);
+  }
+
+  const tex=new THREE.CanvasTexture(c);
+  const geo=new THREE.SphereGeometry(3000,64,64);
+  const mat=new THREE.MeshBasicMaterial({map:tex,side:THREE.BackSide,depthWrite:false});
+  scene.add(new THREE.Mesh(geo,mat));
+})();
+
+// ═══════════════════════════════════════════════════════════
+//  3-D STAR PARTICLES — float in 3D space for parallax
+// ═══════════════════════════════════════════════════════════
+function makeStarSprite() {
+  const c=document.createElement('canvas'); c.width=c.height=64;
+  const ctx=c.getContext('2d'), cx=32;
+  const g=ctx.createRadialGradient(cx,cx,0,cx,cx,cx);
+  g.addColorStop(0,'rgba(255,255,255,1)');
+  g.addColorStop(.14,'rgba(255,255,255,.95)');
+  g.addColorStop(.4,'rgba(200,215,255,.35)');
+  g.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,64,64);
+  return new THREE.CanvasTexture(c);
+}
+const STEX=makeStarSprite();
+
+const VERT_STATIC=`
+  attribute float size; attribute vec3 color;
+  varying vec3 vCol;
+  void main(){
+    vCol=color;
+    vec4 mv=modelViewMatrix*vec4(position,1.0);
+    gl_PointSize=size*(300.0/-mv.z);
+    gl_Position=projectionMatrix*mv;
+  }
+`;
+const VERT_TWINKLE=`
+  attribute float size; attribute vec3 color; attribute float phase;
+  varying vec3 vCol; uniform float time;
+  void main(){
+    vCol=color;
+    float tw=1.0+0.32*sin(time*2.6+phase)+0.16*sin(time*5.3+phase*1.8);
+    vec4 mv=modelViewMatrix*vec4(position,1.0);
+    gl_PointSize=size*tw*(300.0/-mv.z);
+    gl_Position=projectionMatrix*mv;
+  }
+`;
+const FRAG=`
+  uniform sampler2D tex; varying vec3 vCol;
+  void main(){
+    vec4 t=texture2D(tex,gl_PointCoord);
+    if(t.a<0.01)discard;
+    gl_FragColor=vec4(vCol,1.0)*t;
+  }
+`;
+
+function buildStars(N,spread,s0,s1,twinkle=false) {
+  const pos=new Float32Array(N*3),col=new Float32Array(N*3),
+        sz=new Float32Array(N),ph=new Float32Array(N);
+  for(let i=0;i<N;i++){
+    const th=Math.random()*Math.PI*2,phi=Math.acos(2*Math.random()-1);
+    const r=spread*(.80+Math.random()*.20);
+    pos[i*3]=r*Math.sin(phi)*Math.cos(th);
+    pos[i*3+1]=r*Math.sin(phi)*Math.sin(th);
+    pos[i*3+2]=r*Math.cos(phi);
+    const t=Math.random();
+    if(t<.50){col[i*3]=.88;col[i*3+1]=.93;col[i*3+2]=1.0;}
+    else if(t<.74){col[i*3]=1;col[i*3+1]=1;col[i*3+2]=1;}
+    else if(t<.88){col[i*3]=1;col[i*3+1]=.87;col[i*3+2]=.58;}
+    else{col[i*3]=1;col[i*3+1]=.73;col[i*3+2]=.79;}
+    sz[i]=s0+Math.random()*(s1-s0);
+    ph[i]=Math.random()*Math.PI*2;
+  }
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  geo.setAttribute('color',new THREE.BufferAttribute(col,3));
+  geo.setAttribute('size',new THREE.BufferAttribute(sz,1));
+  if(twinkle) geo.setAttribute('phase',new THREE.BufferAttribute(ph,1));
+  const mat=new THREE.ShaderMaterial({
+    uniforms:{tex:{value:STEX},time:{value:0}},
+    vertexShader:twinkle?VERT_TWINKLE:VERT_STATIC,
+    fragmentShader:FRAG,
+    transparent:true,depthWrite:false,
+    blending:THREE.AdditiveBlending,vertexColors:true
+  });
+  const pts=new THREE.Points(geo,mat);
+  scene.add(pts);
+  return {pts,mat};
+}
+
+const L1=buildStars(6000,1100,.55,1.8);
+const L2=buildStars(3500, 650,.85,2.9);
+const L3=buildStars(1000, 380,1.8,5.2);
+const L4=buildStars( 350, 300,4.5,10.5,true);
+const L5=buildStars(  55, 240,9.0,20.0,true);
+
+// ═══════════════════════════════════════════════════════════
+//  NEBULA CLOUDS
+// ═══════════════════════════════════════════════════════════
+function gTex(sz,r,g,b,sh=0.20){
+  const c=document.createElement('canvas');c.width=c.height=sz;
+  const ctx=c.getContext('2d'),cx=sz/2;
+  const grd=ctx.createRadialGradient(cx,cx,0,cx,cx,cx);
+  grd.addColorStop(0,   `rgba(${r},${g},${b},1)`);
+  grd.addColorStop(sh,  `rgba(${r},${g},${b},.72)`);
+  grd.addColorStop(.60, `rgba(${r},${g},${b},.16)`);
+  grd.addColorStop(1,   `rgba(${r},${g},${b},0)`);
+  ctx.fillStyle=grd;ctx.fillRect(0,0,sz,sz);
+  return new THREE.CanvasTexture(c);
+}
+function wTex(sz,r,g,b){
+  const c=document.createElement('canvas');c.width=c.height=sz;
+  const ctx=c.getContext('2d');
+  for(let i=0;i<9;i++){
+    const ox=sz/2+(Math.random()-.5)*sz*.42,oy=sz/2+(Math.random()-.5)*sz*.42;
+    const rad=sz*(.11+Math.random()*.30),a=.14+Math.random()*.26;
+    const grd=ctx.createRadialGradient(ox,oy,0,ox,oy,rad);
+    grd.addColorStop(0,`rgba(${r},${g},${b},${a})`);
+    grd.addColorStop(.5,`rgba(${r},${g},${b},${a*.32})`);
+    grd.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=grd;ctx.fillRect(0,0,sz,sz);
+  }
+  return new THREE.CanvasTexture(c);
+}
+
+const ADD=THREE.AdditiveBlending, clouds=[];
+function cl(tex,x,y,z,sx,sy,rz,op){
+  const m=new THREE.Mesh(new THREE.PlaneGeometry(1,1),
+    new THREE.MeshBasicMaterial({map:tex,transparent:true,opacity:op,
+      blending:ADD,depthWrite:false,side:THREE.DoubleSide}));
+  m.position.set(x,y,z);m.scale.set(sx,sy,1);m.rotation.z=rz;
+  scene.add(m);clouds.push(m);return m;
+}
+
+const tC =gTex(512,255, 55,138,.10);
+const tM =gTex(512,255, 18,192,.07);
+const tP =gTex(512,255,108,172,.22);
+const tR =gTex(512,238, 75,138,.35);
+const tD =gTex(512,188, 55,118,.46);
+const tB =gTex(512, 75, 65,208,.50);
+const tW =gTex(512,255,148, 52,.38);
+const wA=wTex(512,255, 92,155);
+const wB=wTex(512,218, 52,182);
+const wC=wTex(512,255,132,125);
+const wD=wTex(512,172, 68,212);
+const wE=wTex(512,255,165, 98);
+
+cl(tC,  0,  0,  0,390,305, .00,.62);
+cl(tC,  6, -5,-13,310,246, .42,.42);
+cl(tM,  0,  0,  7,210,182,-.22,.55);
+cl(tP,-44, 23,-20,348,266, .68,.44);
+cl(tP, 54,-17,-15,296,226,-.58,.40);
+cl(tP, 13, 46,  8,228,200,1.18,.34);
+cl(tP,-20,-40, 13,258,206,-1.22,.32);
+cl(tR,  0,  0,  0,575,458, .32,.22);
+cl(tR,-30,-19, 23,495,386,-.72,.18);
+cl(tR, 40, 29,-11,435,346, 1.44,.16);
+cl(tD,  0,  0,  0,700,556, .22,.15);
+cl(tB,-68, 44,-34,372,306, .84,.22);
+cl(tB, 60,-40,-30,308,268,-1.08,.18);
+cl(tB, -9, 58, 19,290,238, 1.64,.15);
+cl(tW, 30,-30, 15,208,170, .98,.15);
+cl(tW,-24, 34, -7,188,152,-.44,.13);
+cl(wA,-78, 13,-45,435,218,-.30,.40);
+cl(wA, 88,-24, 20,358,180, .88,.34);
+cl(wB, 24, 68, 34,318,158, 1.24,.32);
+cl(wB,-34,-58, 11,272,144,-1.58,.28);
+cl(wC, 65, 44,-24,298,162, .24,.28);
+cl(wC,-54,-30, 36,338,152,-.95,.26);
+cl(wD, 13,-68, 17,252,132, 1.88,.24);
+cl(wD,-68, 54,-11,232,122, .60,.21);
+cl(wE, 42,-42, 30,208,108, 1.12,.19);
+
+for(let i=0;i<22;i++){
+  const T=[wA,wB,wC,wD,wE];
+  const a=(i/22)*Math.PI*2,r=68+Math.random()*95;
+  cl(T[i%5],
+    Math.cos(a)*r+(Math.random()-.5)*30,
+    Math.sin(a)*r*.62+(Math.random()-.5)*30,
+    (Math.random()-.5)*95,
+    145+Math.random()*210,78+Math.random()*138,
+    Math.random()*Math.PI*2,
+    .12+Math.random()*.22);
+}
+
+// Embedded cluster
+(function(){
+  const N=900,pos=new Float32Array(N*3),col=new Float32Array(N*3),
+        sz=new Float32Array(N),ph=new Float32Array(N);
+  for(let i=0;i<N;i++){
+    const r=Math.abs(Math.random()+Math.random()+Math.random()-1.5)*88;
+    const th=Math.random()*Math.PI*2,phi=Math.acos(2*Math.random()-1);
+    pos[i*3]=r*Math.sin(phi)*Math.cos(th);
+    pos[i*3+1]=r*Math.sin(phi)*Math.sin(th);
+    pos[i*3+2]=r*Math.cos(phi);
+    if(Math.random()<.55){col[i*3]=.87;col[i*3+1]=.93;col[i*3+2]=1.0;}
+    else{col[i*3]=1;col[i*3+1]=.83;col[i*3+2]=.89;}
+    sz[i]=1.8+Math.random()*5.5; ph[i]=Math.random()*Math.PI*2;
+  }
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  geo.setAttribute('color',new THREE.BufferAttribute(col,3));
+  geo.setAttribute('size',new THREE.BufferAttribute(sz,1));
+  geo.setAttribute('phase',new THREE.BufferAttribute(ph,1));
+  const mat=new THREE.ShaderMaterial({
+    uniforms:{tex:{value:STEX},time:{value:0}},
+    vertexShader:VERT_TWINKLE,fragmentShader:FRAG,
+    transparent:true,depthWrite:false,
+    blending:THREE.AdditiveBlending,vertexColors:true
+  });
+  scene.add(new THREE.Points(geo,mat));
+  window._cMat=mat;
+})();
+
+// Nucleus
+const nT=gTex(256,255,238,255,.04);
+const nM=new THREE.Mesh(new THREE.PlaneGeometry(1,1),
+  new THREE.MeshBasicMaterial({map:nT,transparent:true,opacity:.94,blending:ADD,depthWrite:false}));
+nM.scale.set(52,52,1); scene.add(nM); clouds.push(nM);
+
+const hT=gTex(128,255,255,255,.03);
+const hM=new THREE.Mesh(new THREE.PlaneGeometry(1,1),
+  new THREE.MeshBasicMaterial({map:hT,transparent:true,opacity:.90,blending:ADD,depthWrite:false}));
+hM.scale.set(22,22,1); scene.add(hM); clouds.push(hM);
+
+// ═══════════════════════════════════════════════════════════
+//  ORBIT CAMERA
+// ═══════════════════════════════════════════════════════════
+const O={
+  theta:.35,phi:1.42,radius:220,
+  tTheta:.35,tPhi:1.42,tRadius:220,
+  target:new THREE.Vector3(0,0,0),tTarget:new THREE.Vector3(0,0,0),
+  vTheta:0,vPhi:0,
+  DAMP:.07,INERTIA:.92,ORBIT_S:.005,PAN_S:.018,ZOOM_S:.09,DOLLY_S:.12,
+  MIN_R:30,MAX_R:1500,MIN_PHI:.04,MAX_PHI:Math.PI-.04,
+  down:false,btn:-1,lx:0,ly:0
+};
+const cv=renderer.domElement;
+cv.addEventListener('mousedown',e=>{e.preventDefault();O.down=true;O.btn=e.button;O.lx=e.clientX;O.ly=e.clientY;O.vTheta=0;O.vPhi=0;});
+window.addEventListener('mousemove',e=>{
+  if(!O.down)return;
+  const dx=e.clientX-O.lx,dy=e.clientY-O.ly;O.lx=e.clientX;O.ly=e.clientY;
+  if(O.btn===0){const dT=-dx*O.ORBIT_S,dP=-dy*O.ORBIT_S;O.tTheta+=dT;O.tPhi=Math.max(O.MIN_PHI,Math.min(O.MAX_PHI,O.tPhi+dP));O.vTheta=dT*.55;O.vPhi=dP*.55;}
+  else if(O.btn===2){const fwd=new THREE.Vector3();camera.getWorldDirection(fwd);const right=new THREE.Vector3().crossVectors(fwd,new THREE.Vector3(0,1,0)).normalize();const up=new THREE.Vector3().crossVectors(right,fwd).normalize();const sc=O.tRadius*O.PAN_S*.03;O.tTarget.addScaledVector(right,-dx*sc);O.tTarget.addScaledVector(up,dy*sc);}
+  else if(O.btn===1){O.tRadius=Math.max(O.MIN_R,Math.min(O.MAX_R,O.tRadius-dy*O.DOLLY_S));}
+});
+window.addEventListener('mouseup',()=>{O.down=false;O.btn=-1;});
+cv.addEventListener('wheel',e=>{e.preventDefault();O.tRadius=Math.max(O.MIN_R,Math.min(O.MAX_R,O.tRadius*(1+(e.deltaY>0?1:-1)*O.ZOOM_S)));},{passive:false});
+cv.addEventListener('contextmenu',e=>e.preventDefault());
+let pT=[];
+cv.addEventListener('touchstart',e=>{e.preventDefault();pT=Array.from(e.touches);O.vTheta=0;O.vPhi=0;},{passive:false});
+cv.addEventListener('touchmove',e=>{
+  e.preventDefault();const t=Array.from(e.touches);
+  if(t.length===1&&pT.length===1){const dx=t[0].clientX-pT[0].clientX,dy=t[0].clientY-pT[0].clientY;O.vTheta=-dx*O.ORBIT_S*.5;O.vPhi=-dy*O.ORBIT_S*.5;O.tTheta+=dx*(-O.ORBIT_S);O.tPhi=Math.max(O.MIN_PHI,Math.min(O.MAX_PHI,O.tPhi-dy*O.ORBIT_S));}
+  else if(t.length===2&&pT.length===2){const pd=Math.hypot(pT[1].clientX-pT[0].clientX,pT[1].clientY-pT[0].clientY),cd=Math.hypot(t[1].clientX-t[0].clientX,t[1].clientY-t[0].clientY);O.tRadius=Math.max(O.MIN_R,Math.min(O.MAX_R,O.tRadius*(pd/cd)));}
+  pT=t;
+},{passive:false});
+
+function updCam(){
+  if(!O.down){O.tTheta+=O.vTheta;O.tPhi=Math.max(O.MIN_PHI,Math.min(O.MAX_PHI,O.tPhi+O.vPhi));O.vTheta*=O.INERTIA;O.vPhi*=O.INERTIA;}
+  O.theta+=(O.tTheta-O.theta)*O.DAMP;O.phi+=(O.tPhi-O.phi)*O.DAMP;
+  O.radius+=(O.tRadius-O.radius)*O.DAMP;O.target.lerp(O.tTarget,O.DAMP);
+  const sp=Math.sin(O.phi),cp=Math.cos(O.phi);
+  camera.position.set(O.target.x+O.radius*sp*Math.sin(O.theta),O.target.y+O.radius*cp,O.target.z+O.radius*sp*Math.cos(O.theta));
+  camera.lookAt(O.target);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  ANIMATE
+// ═══════════════════════════════════════════════════════════
+let T=0;
+const nucScale0={nM:[52,52],hM:[22,22]};
+function animate(){
+  requestAnimationFrame(animate); T+=.003;
+  updCam();
+
+  // Billboard clouds
+  clouds.forEach(c=>c.quaternion.copy(camera.quaternion));
+
+  // Nucleus pulse
+  const p=1+Math.sin(T*1.75)*.048;
+  nM.scale.set(52*p,52*p,1); hM.scale.set(22*p,22*p,1);
+
+  // Twinkle uniforms
+  L4.mat.uniforms.time.value=T;
+  L5.mat.uniforms.time.value=T;
+  if(window._cMat) window._cMat.uniforms.time.value=T;
+
+  // Slow star parallax rotation (each layer at diff speed = depth)
+  L1.pts.rotation.y+=.000055; L1.pts.rotation.x+=.000022;
+  L2.pts.rotation.y+=.000090;
+  L3.pts.rotation.y+=.000038;
+  L4.pts.rotation.y+=.000025;
+
+  renderer.render(scene,camera);
+}
+animate();
+
+window.addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+</script>
+</body>
+</html>
