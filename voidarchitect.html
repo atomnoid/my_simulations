@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VOID ARCHITECT</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#000; overflow:hidden; cursor:none; font-family:'Courier New',monospace; }
+canvas { display:block; }
+
+#cursor {
+  position:fixed; pointer-events:none; z-index:100;
+  width:8px; height:8px;
+  border:1px solid rgba(255,255,255,0.4);
+  border-radius:50%;
+  transform:translate(-50%,-50%);
+  transition: width .12s, height .12s;
+}
+#cursor.drag { width:20px; height:20px; border-color:rgba(255,255,255,0.15); }
+
+
+
+/* Vignette */
+#vig {
+  position:fixed; inset:0; pointer-events:none; z-index:40;
+  background:radial-gradient(ellipse 75% 75% at 50% 50%,
+    transparent 40%, rgba(0,0,0,.55) 75%, rgba(0,0,0,.92) 100%);
+}
+
+/* scanlines */
+#scan {
+  position:fixed; inset:0; pointer-events:none; z-index:41;
+  background:repeating-linear-gradient(
+    0deg, transparent, transparent 3px, rgba(0,0,0,.06) 3px, rgba(0,0,0,.06) 4px
+  );
+}
+</style>
+</head>
+<body>
+
+<div id="cursor"></div>
+<div id="vig"></div>
+<div id="scan"></div>
+
+
+
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ═══════════════════════════════════════════════════════════
+//  VOID ARCHITECT
+//  Concept: Infinitely deep brutalist architecture
+//  dissolving into abstract geometry — like the floor plan
+//  of a building that was never meant to be inhabited.
+//
+//  Procedural stacked rings + diagonal slabs + ribbon
+//  helixes + floating debris fields.
+//  Palette: near-black with cold blue-white edges.
+//  Camera: full orbit + pan + zoom + inertia.
+// ═══════════════════════════════════════════════════════════
+
+const W = innerWidth, H = innerHeight;
+const scene    = new THREE.Scene();
+scene.fog      = new THREE.FogExp2(0x000000, 0.006);
+const camera   = new THREE.PerspectiveCamera(55, W/H, 0.1, 500);
+camera.position.set(0, 18, 55);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(W, H);
+renderer.setClearColor(0x000000);
+document.body.appendChild(renderer.domElement);
+
+// ── Lights ───────────────────────────────────────────────
+const amb = new THREE.AmbientLight(0xffffff, 0.55);
+scene.add(amb);
+
+const key = new THREE.DirectionalLight(0xdde8ff, 3.2);
+key.position.set(30, 60, 40);
+scene.add(key);
+
+const rim = new THREE.DirectionalLight(0xbbccdd, 1.8);
+rim.position.set(-40, 20, -30);
+scene.add(rim);
+
+const fill = new THREE.DirectionalLight(0xaabbcc, 1.2);
+fill.position.set(0, -20, 60);
+scene.add(fill);
+
+const under = new THREE.DirectionalLight(0x7799bb, 0.9);
+under.position.set(0, -60, 0);
+scene.add(under);
+
+const core = new THREE.PointLight(0x99aacc, 2.5, 80);
+core.position.set(0, 0, 0);
+scene.add(core);
+
+// ── Materials ─────────────────────────────────────────────
+function mat(col, rough=0.85, metal=0.0) {
+  return new THREE.MeshStandardMaterial({ color:col, roughness:rough, metalness:metal, side:THREE.DoubleSide });
+}
+function wireMat(col) {
+  return new THREE.MeshBasicMaterial({ color:col, wireframe:true });
+}
+function lineMat(col, op=1) {
+  return new THREE.LineBasicMaterial({ color:col, transparent:op<1, opacity:op });
+}
+
+const M = {
+  concrete:  mat(0x4a4e54, 0.88, 0.05),
+  slab:      mat(0x38393d, 0.92, 0.05),
+  steel:     mat(0x5a6070, 0.45, 0.75),
+  wireLight: wireMat(0x7080a0),
+  wireFaint: wireMat(0x3a4050),
+  edge:      lineMat(0x8090b0, 0.85),
+  edgeFaint: lineMat(0x506070, 0.5),
+};
+
+// ── Geometry helpers ──────────────────────────────────────
+function addEdges(mesh, col=0x7080a0, thresh=Math.PI/6) {
+  const eg = new THREE.EdgesGeometry(mesh.geometry, thresh);
+  const el = new THREE.LineSegments(eg, lineMat(col));
+  mesh.add(el);
+}
+
+// ── STACKED RING TOWER ────────────────────────────────────
+const towerGroup = new THREE.Group();
+
+for (let i = 0; i < 28; i++) {
+  const y      = i * 3.2 - 42;
+  const radius = 14 + Math.sin(i * 0.38) * 4;
+  const height = 0.25 + Math.abs(Math.sin(i * 0.7)) * 0.6;
+  const rot    = i * 0.12;
+  const segs   = 6 + (i % 3); // hex / oct / nonagon
+
+  const geo  = new THREE.CylinderGeometry(radius, radius * 1.02, height, segs, 1, true);
+  const mesh = new THREE.Mesh(geo, i % 4 === 0 ? M.steel : M.concrete);
+  mesh.rotation.y = rot;
+  mesh.position.y = y;
+  addEdges(mesh, 0x6070a0, Math.PI/4);
+  towerGroup.add(mesh);
+
+  // Thin cap disc
+  if (i % 2 === 0) {
+    const capG = new THREE.CylinderGeometry(radius * 0.96, radius * 0.96, 0.04, segs);
+    const cap  = new THREE.Mesh(capG, M.slab);
+    cap.rotation.y = rot;
+    cap.position.y = y + height/2;
+    towerGroup.add(cap);
+  }
+
+  // Radial fins
+  if (i % 3 === 0) {
+    for (let f = 0; f < segs; f++) {
+      const angle = (f / segs) * Math.PI * 2 + rot;
+      const finW  = 0.08, finH = 1.4 + Math.random() * 1.2;
+      const finD  = radius * 0.7;
+      const finG  = new THREE.BoxGeometry(finW, finH, finD);
+      const fin   = new THREE.Mesh(finG, M.steel);
+      fin.position.set(Math.cos(angle) * radius * 0.5, y + height/2 + finH/2, Math.sin(angle) * radius * 0.5);
+      fin.rotation.y = angle + Math.PI/2;
+      towerGroup.add(fin);
+    }
+  }
+}
+scene.add(towerGroup);
+
+// ── DIAGONAL SLAB FIELD ───────────────────────────────────
+const slabGroup = new THREE.Group();
+
+for (let i = 0; i < 40; i++) {
+  const w = 3 + Math.random() * 8;
+  const h = 0.08 + Math.random() * 0.18;
+  const d = 2 + Math.random() * 6;
+  const geo  = new THREE.BoxGeometry(w, h, d);
+  const mesh = new THREE.Mesh(geo, M.slab);
+
+  const r    = 18 + Math.random() * 32;
+  const ang  = Math.random() * Math.PI * 2;
+  mesh.position.set(
+    Math.cos(ang) * r,
+    -42 + Math.random() * 100,
+    Math.sin(ang) * r
+  );
+  mesh.rotation.set(
+    (Math.random()-.5) * 0.6,
+    Math.random() * Math.PI,
+    (Math.random()-.5) * 0.8
+  );
+  addEdges(mesh, 0x506080);
+  slabGroup.add(mesh);
+}
+scene.add(slabGroup);
+
+// ── RIBBON HELIXES ────────────────────────────────────────
+function makeHelix(startY, endY, radius, turns, width, colHex) {
+  const pts = [], steps = 300;
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const angle = t * turns * Math.PI * 2;
+    const y     = startY + (endY - startY) * t;
+    pts.push(new THREE.Vector3(Math.cos(angle)*radius, y, Math.sin(angle)*radius));
+  }
+
+  // Build ribbon: extrude normals perpendicular to path
+  const positions = [], indices = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const curr = pts[i], next = pts[i+1];
+    const dir  = next.clone().sub(curr).normalize();
+    const up   = new THREE.Vector3(0,1,0);
+    const norm = dir.clone().cross(up).normalize().multiplyScalar(width/2);
+
+    positions.push(
+      curr.x+norm.x, curr.y+norm.y, curr.z+norm.z,
+      curr.x-norm.x, curr.y-norm.y, curr.z-norm.z
+    );
+    if (i < pts.length - 2) {
+      const b = i*2;
+      indices.push(b,b+1,b+2, b+1,b+3,b+2);
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+
+  const mesh = new THREE.Mesh(geo, mat(colHex, 0.7, 0.3));
+  addEdges(mesh, colHex, Math.PI/3);
+  return mesh;
+}
+
+scene.add(makeHelix(-40,  40,  16, 3.5, 0.6, 0x4a5060));
+scene.add(makeHelix(-38,  38,  22, 2.8, 0.4, 0x3a4450));
+scene.add(makeHelix(-30,  30,  10, 5.0, 0.3, 0x505a6a));
+
+// ── CENTRAL MONOLITH ──────────────────────────────────────
+const monoGeo  = new THREE.BoxGeometry(2.2, 90, 2.2);
+const mono     = new THREE.Mesh(monoGeo, M.steel);
+mono.position.y = 0;
+addEdges(mono, 0x8090b8, Math.PI/6);
+scene.add(mono);
+
+// Monolith edge glow lines
+const mEl = [
+  [[-1.1,-45,-1.1],[-1.1,45,-1.1]],
+  [[ 1.1,-45,-1.1],[ 1.1,45,-1.1]],
+  [[-1.1,-45, 1.1],[-1.1,45, 1.1]],
+  [[ 1.1,-45, 1.1],[ 1.1,45, 1.1]],
+];
+mEl.forEach(([a,b]) => {
+  const g = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(...a), new THREE.Vector3(...b)
+  ]);
+  scene.add(new THREE.Line(g, lineMat(0x8090b8, 0.85)));
+});
+
+// ── DEBRIS FIELD ─────────────────────────────────────────
+const debrisGroup = new THREE.Group();
+const debrisGeos  = [
+  new THREE.TetrahedronGeometry(1),
+  new THREE.OctahedronGeometry(0.8),
+  new THREE.BoxGeometry(1,1,1),
+  new THREE.IcosahedronGeometry(0.7, 0),
+];
+
+for (let i = 0; i < 120; i++) {
+  const geo  = debrisGeos[i % debrisGeos.length].clone();
+  const s    = 0.08 + Math.random() * 0.45;
+  const mesh = new THREE.Mesh(geo, i%5===0 ? M.steel : M.slab);
+  mesh.scale.setScalar(s);
+
+  const r    = 28 + Math.random() * 55;
+  const ang  = Math.random() * Math.PI * 2;
+  mesh.position.set(
+    Math.cos(ang) * r + (Math.random()-.5)*10,
+    -48 + Math.random() * 110,
+    Math.sin(ang) * r + (Math.random()-.5)*10
+  );
+  mesh.rotation.set(Math.random()*Math.PI*2, Math.random()*Math.PI*2, Math.random()*Math.PI*2);
+
+  if (i % 4 === 0) addEdges(mesh, 0x506070);
+  debrisGroup.add(mesh);
+}
+scene.add(debrisGroup);
+
+// ── RADIAL SPOKE FLOOR ────────────────────────────────────
+const floorGroup = new THREE.Group();
+const SPOKES = 24;
+for (let i = 0; i < SPOKES; i++) {
+  const angle = (i / SPOKES) * Math.PI * 2;
+  const pts   = [
+    new THREE.Vector3(Math.cos(angle)*2,   -44, Math.sin(angle)*2),
+    new THREE.Vector3(Math.cos(angle)*80,  -44, Math.sin(angle)*80),
+  ];
+  const g = new THREE.BufferGeometry().setFromPoints(pts);
+  floorGroup.add(new THREE.Line(g, lineMat(0x3a4860, 0.6)));
+}
+// Concentric rings on floor
+for (let r = 6; r <= 72; r += 8) {
+  const pts = [];
+  for (let i = 0; i <= 64; i++) {
+    const a = (i/64)*Math.PI*2;
+    pts.push(new THREE.Vector3(Math.cos(a)*r, -44, Math.sin(a)*r));
+  }
+  const g = new THREE.BufferGeometry().setFromPoints(pts);
+  floorGroup.add(new THREE.Line(g, lineMat(0x304050, r < 24 ? 0.65 : 0.35)));
+}
+scene.add(floorGroup);
+
+// ── OUTER CAGE ────────────────────────────────────────────
+const cageGeo  = new THREE.IcosahedronGeometry(90, 1);
+const cage     = new THREE.Mesh(cageGeo, wireMat(0x202830));
+scene.add(cage);
+
+// ── ORBIT CAMERA CONTROL ──────────────────────────────────
+const O = {
+  theta: 0.4, phi: 1.1, radius: 55,
+  target: new THREE.Vector3(0,0,0),
+  tTheta: 0.4, tPhi: 1.1, tRadius: 55,
+  tTarget: new THREE.Vector3(0,0,0),
+  vTheta: 0, vPhi: 0,
+  DAMP: 0.07, INERTIA: 0.91,
+  ORBIT_S: 0.006, PAN_S: 0.02, ZOOM_S: 0.10, DOLLY_S: 0.15,
+  MIN_R: 5, MAX_R: 180, MIN_PHI: 0.04, MAX_PHI: Math.PI-0.04,
+  down: false, btn: -1, lx: 0, ly: 0,
+};
+
+const cvs = renderer.domElement;
+
+cvs.addEventListener('mousedown', e => {
+  e.preventDefault();
+  O.down=true; O.btn=e.button; O.lx=e.clientX; O.ly=e.clientY;
+  O.vTheta=0; O.vPhi=0;
+  curEl.classList.add('drag');
+});
+
+window.addEventListener('mousemove', e => {
+  mouse.x=e.clientX; mouse.y=e.clientY;
+  curEl.style.left=e.clientX+'px'; curEl.style.top=e.clientY+'px';
+  if (!O.down) return;
+  const dx=e.clientX-O.lx, dy=e.clientY-O.ly;
+  O.lx=e.clientX; O.ly=e.clientY;
+  if (O.btn===0) {
+    const dT=-dx*O.ORBIT_S, dP=-dy*O.ORBIT_S;
+    O.tTheta+=dT; O.tPhi=Math.max(O.MIN_PHI,Math.min(O.MAX_PHI,O.tPhi+dP));
+    O.vTheta=dT*0.55; O.vPhi=dP*0.55;
+  } else if (O.btn===2) {
+    const fwd=new THREE.Vector3(); camera.getWorldDirection(fwd);
+    const right=new THREE.Vector3().crossVectors(fwd,new THREE.Vector3(0,1,0)).normalize();
+    const up=new THREE.Vector3().crossVectors(right,fwd).normalize();
+    const sc=O.tRadius*O.PAN_S*0.035;
+    O.tTarget.addScaledVector(right,-dx*sc);
+    O.tTarget.addScaledVector(up,dy*sc);
+  } else if (O.btn===1) {
+    O.tRadius=Math.max(O.MIN_R,Math.min(O.MAX_R,O.tRadius-dy*O.DOLLY_S));
+  }
+});
+
+window.addEventListener('mouseup', () => {
+  O.down=false; O.btn=-1;
+  curEl.classList.remove('drag');
+});
+
+cvs.addEventListener('wheel', e => {
+  e.preventDefault();
+  O.tRadius=Math.max(O.MIN_R,Math.min(O.MAX_R,O.tRadius*(1+(e.deltaY>0?1:-1)*O.ZOOM_S)));
+},{passive:false});
+
+cvs.addEventListener('contextmenu', e=>e.preventDefault());
+
+let prevT=[];
+cvs.addEventListener('touchstart',e=>{e.preventDefault();prevT=Array.from(e.touches);O.vTheta=0;O.vPhi=0;},{passive:false});
+cvs.addEventListener('touchmove',e=>{
+  e.preventDefault();
+  const t=Array.from(e.touches);
+  if(t.length===1&&prevT.length===1){
+    const dx=t[0].clientX-prevT[0].clientX,dy=t[0].clientY-prevT[0].clientY;
+    O.vTheta=-dx*O.ORBIT_S*.5;O.vPhi=-dy*O.ORBIT_S*.5;
+    O.tTheta+=dx*(-O.ORBIT_S);O.tPhi=Math.max(O.MIN_PHI,Math.min(O.MAX_PHI,O.tPhi-dy*O.ORBIT_S));
+  } else if(t.length===2&&prevT.length===2){
+    const pd=Math.hypot(prevT[1].clientX-prevT[0].clientX,prevT[1].clientY-prevT[0].clientY);
+    const cd=Math.hypot(t[1].clientX-t[0].clientX,t[1].clientY-t[0].clientY);
+    O.tRadius=Math.max(O.MIN_R,Math.min(O.MAX_R,O.tRadius*(pd/cd)));
+  }
+  prevT=t;
+},{passive:false});
+
+function updateCamera() {
+  if (!O.down) {
+    O.tTheta+=O.vTheta; O.tPhi=Math.max(O.MIN_PHI,Math.min(O.MAX_PHI,O.tPhi+O.vPhi));
+    O.vTheta*=O.INERTIA; O.vPhi*=O.INERTIA;
+  }
+  O.theta +=(O.tTheta -O.theta) *O.DAMP;
+  O.phi   +=(O.tPhi   -O.phi)   *O.DAMP;
+  O.radius+=(O.tRadius-O.radius)*O.DAMP;
+  O.target.lerp(O.tTarget,O.DAMP);
+  const sp=Math.sin(O.phi),cp=Math.cos(O.phi);
+  camera.position.set(
+    O.target.x+O.radius*sp*Math.sin(O.theta),
+    O.target.y+O.radius*cp,
+    O.target.z+O.radius*sp*Math.cos(O.theta)
+  );
+  camera.lookAt(O.target);
+}
+
+// ── Animation vars ────────────────────────────────────────
+const mouse = { x: W/2, y: H/2 };
+const curEl = document.getElementById('cursor');
+let t = 0, frame = 0;
+
+// Per-debris rotation axes (precomputed for perf)
+const debrisAxes = [];
+debrisGroup.children.forEach(() => {
+  debrisAxes.push(new THREE.Vector3(Math.random()-.5,Math.random()-.5,Math.random()-.5).normalize());
+});
+
+// ── Animate ───────────────────────────────────────────────
+function animate() {
+  requestAnimationFrame(animate);
+  t     += 0.005;
+  frame++;
+
+  updateCamera();
+
+  // Tower breathe — subtle radius pulse via Y-scale of rings
+  towerGroup.children.forEach((child, i) => {
+    child.rotation.y += 0.0003 * (i % 2 === 0 ? 1 : -1);
+  });
+
+  // Helixes counter-rotate
+  const helixes = scene.children.filter(c => c.isMesh && c.geometry && c.geometry.type === 'BufferGeometry' && c.geometry.index);
+  // Subtle scene-level rotation for helixes (they are direct children)
+  scene.children.forEach(child => {
+    if (child._helix) {
+      child.rotation.y += child._helixSpd;
+    }
+  });
+
+  // Debris drift
+  debrisGroup.children.forEach((d, i) => {
+    d.rotateOnAxis(debrisAxes[i], 0.002 + (i%7)*0.0003);
+    d.position.y += Math.sin(t + i * 0.4) * 0.004;
+  });
+
+  // Slab gentle oscillation
+  slabGroup.children.forEach((s, i) => {
+    s.rotation.z += Math.sin(t * 0.3 + i) * 0.0003;
+    s.position.y += Math.sin(t * 0.5 + i * 0.7) * 0.003;
+  });
+
+  // Outer cage slow rotation
+  cage.rotation.y += 0.0002;
+  cage.rotation.x += 0.00008;
+
+
+  renderer.render(scene, camera);
+}
+
+// Hint fade removed
+
+animate();
+
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>sg
