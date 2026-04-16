@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>∞</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; overflow: hidden; cursor: none; }
+  canvas { display: block; position: fixed; inset: 0; }
+
+  #cursor {
+    position: fixed; pointer-events: none; z-index: 100;
+    width: 5px; height: 5px; border-radius: 50%;
+    background: rgba(255,255,255,0.9);
+    transform: translate(-50%,-50%);
+    transition: transform 0.1s;
+    mix-blend-mode: difference;
+  }
+
+  #label {
+    position: fixed; bottom: 28px; left: 50%;
+    transform: translateX(-50%);
+    font-family: 'Courier New', monospace;
+    font-size: 9px; letter-spacing: 5px;
+    color: rgba(255,255,255,0.1);
+    text-transform: uppercase;
+    pointer-events: none;
+    white-space: nowrap;
+    transition: opacity 1s;
+  }
+</style>
+</head>
+<body>
+<div id="cursor"></div>
+<canvas id="c"></canvas>
+<div id="label">scroll · morph &nbsp;&nbsp; drag · rotate &nbsp;&nbsp; click · next</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ── RENDERER ─────────────────────────────────────────────────────
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('c'), antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setClearColor(0x000000);
+
+const scene  = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 500);
+camera.position.z = 90;
+
+const clock = new THREE.Clock();
+let T = 0;
+
+// ── CURSOR ───────────────────────────────────────────────────────
+const cur = document.getElementById('cursor');
+const mouse = { x: 0, y: 0, down: false, dx: 0, dy: 0 };
+let lx = 0, ly = 0;
+document.addEventListener('mousemove', e => {
+  mouse.dx = e.clientX - lx; mouse.dy = e.clientY - ly;
+  lx = e.clientX; ly = e.clientY;
+  mouse.x = (e.clientX / innerWidth  - 0.5) * 2;
+  mouse.y = (e.clientY / innerHeight - 0.5) * -2;
+  cur.style.left = e.clientX + 'px';
+  cur.style.top  = e.clientY + 'px';
+});
+document.addEventListener('mousedown', () => mouse.down = true);
+document.addEventListener('mouseup',   () => mouse.down = false);
+
+// Drag rotation
+let rotX = 0, rotY = 0, velX = 0, velY = 0;
+document.addEventListener('mousemove', e => {
+  if (!mouse.down) return;
+  velY += mouse.dx * 0.003;
+  velX += mouse.dy * 0.003;
+});
+
+// Scroll morph
+let morphScroll = 0;
+document.addEventListener('wheel', e => {
+  morphScroll += e.deltaY * 0.0004;
+}, { passive: true });
+
+// Click → next surface
+let surfaceIdx = 0;
+let morphT     = 1.0; // 1=fully arrived, 0=just switched
+let prevSurface = 0;
+document.addEventListener('click', e => {
+  if (e.detail === 2) return;
+  prevSurface = surfaceIdx;
+  surfaceIdx  = (surfaceIdx + 1) % surfaces.length;
+  morphT = 0;
+});
+
+// ── SURFACE DEFINITIONS ──────────────────────────────────────────
+// Each surface is a function (u, v, time) → {x, y, z}
+// u, v ∈ [0, 1]
+const surfaces = [
+
+  // 0 — KLEIN BOTTLE (4D surface projected to 3D)
+  {
+    name: 'Klein Bottle',
+    uRange: [0, 2*Math.PI], vRange: [0, 2*Math.PI],
+    uSegs: 80, vSegs: 50,
+    fn(u, v, t) {
+      const a = 6, twist = t * 0.3;
+      let x, y, z;
+      if (u < Math.PI) {
+        x = a * (1 - Math.cos(u)/2) * Math.cos(u) * Math.cos(v+twist);
+        y = a * Math.sin(u) * (1 + Math.sin(u) / 4);
+        z = a * (1 - Math.cos(u)/2) * Math.sin(v+twist);
+      } else {
+        x = a * (1 - Math.cos(u)/2) * Math.cos(u) * Math.cos(v+twist);
+        y = a * Math.sin(u);
+        z = a * (1 - Math.cos(u)/2) * Math.sin(v+twist);
+      }
+      return { x: x * 2.2, y: y * 2.2 - 4, z: z * 2.2 };
+    }
+  },
+
+  // 1 — TORUS KNOT SURFACE (tube around a torus knot)
+  {
+    name: 'Torus Knot',
+    uRange: [0, 2*Math.PI], vRange: [0, 2*Math.PI],
+    uSegs: 180, vSegs: 16,
+    fn(u, v, t) {
+      const p = 3, q = 5, R = 18, r = 5, tube = 3;
+      const twist = t * 0.2;
+      const cu = Math.cos(u+twist), su = Math.sin(u+twist);
+      const cx = (R + r*Math.cos(q*u)) * Math.cos(p*u);
+      const cy = (R + r*Math.cos(q*u)) * Math.sin(p*u);
+      const cz = r * Math.sin(q*u);
+      // frenet tube
+      const eps = 0.01;
+      const u2 = u + eps;
+      const cx2 = (R + r*Math.cos(q*u2)) * Math.cos(p*u2);
+      const cy2 = (R + r*Math.cos(q*u2)) * Math.sin(p*u2);
+      const cz2 = r * Math.sin(q*u2);
+      let tx = cx2-cx, ty = cy2-cy, tz = cz2-cz;
+      const tl = Math.sqrt(tx*tx+ty*ty+tz*tz)+1e-8;
+      tx/=tl; ty/=tl; tz/=tl;
+      let nx = -ty, ny = tx, nz = 0;
+      const nl = Math.sqrt(nx*nx+ny*ny+nz*nz)+1e-8;
+      nx/=nl; ny/=nl; nz/=nl;
+      const bx = ty*nz-tz*ny, by = tz*nx-tx*nz, bz = tx*ny-ty*nx;
+      const cv = Math.cos(v), sv = Math.sin(v);
+      return {
+        x: cx + tube*(nx*cv + bx*sv),
+        y: cy + tube*(ny*cv + by*sv),
+        z: cz + tube*(nz*cv + bz*sv),
+      };
+    }
+  },
+
+  // 2 — GYROID (minimal surface — nature's own geometry)
+  {
+    name: 'Gyroid',
+    uRange: [-Math.PI, Math.PI], vRange: [-Math.PI, Math.PI],
+    uSegs: 100, vSegs: 100,
+    fn(u, v, t) {
+      // Sample gyroid as iso-surface via heightmap
+      const w = t * 0.4;
+      const scale = 10;
+      // Gyroid: sin(x)cos(y) + sin(y)cos(z) + sin(z)cos(x) = 0
+      // Map u,v to sphere, find z that satisfies
+      const x = u * scale;
+      const y = v * scale;
+      // Approximate z by iteration
+      let z = Math.sin(x + w) * 3;
+      for (let i = 0; i < 3; i++) {
+        const f  = Math.sin(x)*Math.cos(y) + Math.sin(y)*Math.cos(z) + Math.sin(z)*Math.cos(x);
+        const df = -Math.sin(y)*Math.sin(z) + Math.cos(z)*Math.cos(x);
+        z -= f / (df + 0.001);
+      }
+      return { x: x * 2.2, y: y * 2.2, z: z * 2.2 };
+    }
+  },
+
+  // 3 — SEASHELL SURFACE (Fibonacci logarithmic spiral)
+  {
+    name: 'Seashell',
+    uRange: [0, 2*Math.PI], vRange: [0, 6*Math.PI],
+    uSegs: 60, vSegs: 120,
+    fn(u, v, t) {
+      const R = 1, n = 2, H = 3.5, P = 1.2;
+      const twist = t * 0.25;
+      const ev = Math.exp(0.1 * v);
+      const x = ev * (R + n * Math.cos(u)) * Math.cos(v + twist) * P;
+      const y = ev * (R + n * Math.cos(u)) * Math.sin(v + twist) * P;
+      const z = ev * n * Math.sin(u) * 0.8 - ev * H * 0.15;
+      return { x: x * 3, y: y * 3, z: (z - 8) * 3 };
+    }
+  },
+
+  // 4 — MÖBIUS STRIP (one-sided surface with twist)
+  {
+    name: 'Möbius',
+    uRange: [0, 2*Math.PI], vRange: [-1, 1],
+    uSegs: 200, vSegs: 4,
+    fn(u, v, t) {
+      const R = 20, twist = t * 0.15;
+      const x = (R + v * Math.cos(u/2 + twist)) * Math.cos(u);
+      const y = (R + v * Math.cos(u/2 + twist)) * Math.sin(u);
+      const z = v * Math.sin(u/2 + twist) * 6;
+      return { x, y, z };
+    }
+  },
+
+  // 5 — BOY'S SURFACE (non-orientable, no self-intersection)
+  {
+    name: "Boy's Surface",
+    uRange: [0, Math.PI], vRange: [0, Math.PI],
+    uSegs: 80, vSegs: 80,
+    fn(u, v, t) {
+      const twist = t * 0.2;
+      const cu = Math.cos(u+twist), su = Math.sin(u+twist);
+      const cv = Math.cos(v), sv = Math.sin(v);
+      const s2u = Math.sin(2*(u+twist)), c2u = Math.cos(2*(u+twist));
+      const s2v = Math.sin(2*v), c2v = Math.cos(2*v);
+      const d = 2;
+      const x = (d/2) * ((su * Math.cos(v - u) + Math.sqrt(2)*cu*sv*Math.cos(2*u))) / (Math.sqrt(2) - s2u*s2v);
+      const y = (d/2) * ((su * Math.sin(v - u) - Math.sqrt(2)*cu*sv*Math.sin(2*u))) / (Math.sqrt(2) - s2u*s2v);
+      const z = (Math.sqrt(2)*cu*cv) / (Math.sqrt(2) - s2u*s2v);
+      return { x: x*16, y: y*16, z: z*16 };
+    }
+  },
+
+  // 6 — ENNEPER SURFACE (minimal surface with hypnotic twist)
+  {
+    name: 'Enneper',
+    uRange: [-1.5, 1.5], vRange: [-1.5, 1.5],
+    uSegs: 80, vSegs: 80,
+    fn(u, v, t) {
+      const tw = t * 0.3;
+      const cu = Math.cos(tw), su = Math.sin(tw);
+      const ru = u*cu - v*su, rv = u*su + v*cu;
+      const x = ru - ru*ru*ru/3 + ru*rv*rv;
+      const y = rv - rv*rv*rv/3 + rv*ru*ru;
+      const z = ru*ru - rv*rv;
+      return { x: x * 9, y: y * 9, z: z * 9 };
+    }
+  },
+];
+
+// ── GEOMETRY BUILDER ─────────────────────────────────────────────
+function buildSurfaceGeometry(surf, t = 0) {
+  const { uRange, vRange, uSegs, vSegs, fn } = surf;
+  const vertices = [];
+
+  for (let i = 0; i <= uSegs; i++) {
+    const u = uRange[0] + (uRange[1] - uRange[0]) * (i / uSegs);
+    for (let j = 0; j <= vSegs; j++) {
+      const v = vRange[0] + (vRange[1] - vRange[0]) * (j / vSegs);
+      const p = fn(u, v, t);
+      vertices.push(p.x, p.y, p.z);
+    }
+  }
+  return { vertices, uSegs, vSegs };
+}
+
+// We'll compute positions at runtime, store as flat arrays
+let uSegsA, vSegsA;
+let posA, posB; // Float32Arrays for current/next surface points
+
+function computePositions(surf, t) {
+  const { uRange, vRange, uSegs, vSegs, fn } = surf;
+  const arr = new Float32Array((uSegs + 1) * (vSegs + 1) * 3);
+  let idx = 0;
+  for (let i = 0; i <= uSegs; i++) {
+    const u = uRange[0] + (uRange[1] - uRange[0]) * (i / uSegs);
+    for (let j = 0; j <= vSegs; j++) {
+      const v = vRange[0] + (vRange[1] - vRange[0]) * (j / vSegs);
+      let p;
+      try { p = fn(u, v, t); } catch(e) { p = {x:0,y:0,z:0}; }
+      if (!isFinite(p.x) || !isFinite(p.y) || !isFinite(p.z)) p = {x:0,y:0,z:0};
+      arr[idx++] = p.x;
+      arr[idx++] = p.y;
+      arr[idx++] = p.z;
+    }
+  }
+  return arr;
+}
+
+// ── WIREFRAME LINE SYSTEM ────────────────────────────────────────
+// Draw u-lines and v-lines as individual THREE.Line segments
+// This gives us the "drawn grid" look
+
+const lineGroup = new THREE.Group();
+scene.add(lineGroup);
+
+// We'll use a single merged BufferGeometry for all lines
+// Actually use two batched line geometries (u-lines, v-lines)
+let uLineGeo, vLineGeo, uLineMesh, vLineMesh;
+let currentSurf = surfaces[surfaceIdx];
+let nextSurf    = surfaces[surfaceIdx];
+
+function rebuildLines(surf) {
+  // Remove old
+  while (lineGroup.children.length) lineGroup.remove(lineGroup.children[0]);
+
+  const { uSegs, vSegs } = surf;
+  uSegsA = uSegs; vSegsA = vSegs;
+
+  // u-lines: for each u row, draw a line along v
+  const uPts = uSegs + 1; // lines
+  const vPts = vSegs + 1; // points per line
+  const uLineCount = uPts;
+  const vLineCount = vPts;
+
+  // Pack all u-lines into one geometry with NaN breaks
+  const uBuf = new Float32Array(uLineCount * vPts * 3 + uLineCount * 3); // with gaps
+  const vBuf = new Float32Array(vLineCount * uPts * 3 + vLineCount * 3);
+
+  // Placeholder — will be updated each frame
+  uLineGeo = new THREE.BufferGeometry();
+  uLineGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(uLineCount * vPts * 3), 3));
+
+  vLineGeo = new THREE.BufferGeometry();
+  vLineGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(vLineCount * uPts * 3), 3));
+
+  const mat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.45 });
+  const mat2 = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.18 });
+
+  uLineMesh = new THREE.LineSegments(uLineGeo, mat);
+  vLineMesh = new THREE.LineSegments(vLineGeo, mat2);
+  lineGroup.add(uLineMesh);
+  lineGroup.add(vLineMesh);
+}
+
+function updateLines(posArr, uSegs, vSegs, drawFrac = 1.0) {
+  const rows = uSegs + 1;
+  const cols = vSegs + 1;
+  const totalUSegs = rows * vSegs;  // segments
+  const totalVSegs = cols * uSegs;
+  const drawnU = Math.floor(totalUSegs * drawFrac);
+  const drawnV = Math.floor(totalVSegs * drawFrac);
+
+  const uPos = uLineGeo.attributes.position.array;
+  const vPos = vLineGeo.attributes.position.array;
+
+  let uIdx = 0, vIdx = 0;
+
+  // U-lines (along v for each u row)
+  let segCount = 0;
+  outer:
+  for (let i = 0; i < rows; i++) {
+    for (let j = 0; j < vSegs; j++) {
+      if (segCount >= drawnU) break outer;
+      const a = (i * cols + j) * 3;
+      const b = (i * cols + j + 1) * 3;
+      uPos[uIdx++] = posArr[a];   uPos[uIdx++] = posArr[a+1]; uPos[uIdx++] = posArr[a+2];
+      uPos[uIdx++] = posArr[b];   uPos[uIdx++] = posArr[b+1]; uPos[uIdx++] = posArr[b+2];
+      segCount++;
+    }
+  }
+  // Clear remainder
+  while (uIdx < uPos.length) uPos[uIdx++] = 0;
+  uLineGeo.attributes.position.needsUpdate = true;
+  uLineGeo.setDrawRange(0, segCount * 2);
+
+  // V-lines (along u for each v col)
+  segCount = 0;
+  outer2:
+  for (let j = 0; j < cols; j++) {
+    for (let i = 0; i < uSegs; i++) {
+      if (segCount >= drawnV) break outer2;
+      const a = (i * cols + j) * 3;
+      const b = ((i+1) * cols + j) * 3;
+      vPos[vIdx++] = posArr[a];   vPos[vIdx++] = posArr[a+1]; vPos[vIdx++] = posArr[a+2];
+      vPos[vIdx++] = posArr[b];   vPos[vIdx++] = posArr[b+1]; vPos[vIdx++] = posArr[b+2];
+      segCount++;
+    }
+  }
+  while (vIdx < vPos.length) vPos[vIdx++] = 0;
+  vLineGeo.attributes.position.needsUpdate = true;
+  vLineGeo.setDrawRange(0, segCount * 2);
+}
+
+// ── DRAWING PROBE (small sphere at current drawing tip) ──────────
+const probeGeo  = new THREE.SphereGeometry(0.25, 8, 8);
+const probeMat  = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 });
+const probe     = new THREE.Mesh(probeGeo, probeMat);
+scene.add(probe);
+
+// Glow ring around probe
+const glowGeo = new THREE.RingGeometry(0.3, 0.7, 32);
+const glowMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.3, side: THREE.DoubleSide });
+const glowRing = new THREE.Mesh(glowGeo, glowMat);
+scene.add(glowRing);
+
+// ── DRAWING STATE ────────────────────────────────────────────────
+let drawProgress = 0.0;   // 0 → 1
+const DRAW_SPEED = 0.0022;
+
+// ── MORPH STATE ──────────────────────────────────────────────────
+let morphing = false;
+let morphFrom = null;
+let morphTo   = null;
+
+// ── INIT ─────────────────────────────────────────────────────────
+rebuildLines(surfaces[surfaceIdx]);
+drawProgress = 0;
+
+// ── LABEL ────────────────────────────────────────────────────────
+const labelEl = document.getElementById('label');
+let labelTimer = 0;
+
+// ── RIPPLE POOL ──────────────────────────────────────────────────
+const ripples = [];
+document.addEventListener('click', e => {
+  if (e.detail >= 2) return;
+  const geo = new THREE.RingGeometry(0.1, 0.2, 48);
+  const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.7, side: THREE.DoubleSide });
+  const mesh = new THREE.Mesh(geo, mat);
+  // Place ripple in screen-center area
+  mesh.position.set((mouse.x)*30, (mouse.y)*20, 20);
+  mesh.userData = { life: 0 };
+  scene.add(mesh);
+  ripples.push(mesh);
+});
+
+// ── ANIMATE ──────────────────────────────────────────────────────
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.04);
+  T += dt;
+
+  // Drag rotation with inertia
+  velX *= 0.93; velY *= 0.93;
+  rotX += velX; rotY += velY;
+  lineGroup.rotation.x = rotX + mouse.y * 0.12;
+  lineGroup.rotation.y = rotY + mouse.x * 0.18 + T * 0.04;
+
+  // Scroll morph → change color temperature of lines
+  const hue = ((morphScroll % 1) + 1) % 1;
+  const lineColor = new THREE.Color().setHSL(hue, 0.15, 0.95);
+  if (uLineMesh) uLineMesh.material.color.copy(lineColor);
+  if (vLineMesh) vLineMesh.material.color.copy(lineColor);
+
+  // ── Surface switch
+  const surf = surfaces[surfaceIdx];
+
+  if (morphT < 1) {
+    morphT = Math.min(1, morphT + dt * 0.9);
+    // Re-initialize drawing on new surface
+    if (morphT > 0.05 && morphFrom !== surfaceIdx) {
+      morphFrom = surfaceIdx;
+      rebuildLines(surf);
+      drawProgress = 0;
+    }
+  }
+
+  // ── Draw progress
+  if (drawProgress < 1) {
+    drawProgress = Math.min(1, drawProgress + DRAW_SPEED * 60 * dt);
+  }
+
+  // ── Compute surface positions (animated with T)
+  const posArr = computePositions(surf, T);
+
+  // ── Update wireframe with draw progress
+  updateLines(posArr, surf.uSegs, surf.vSegs, drawProgress);
+
+  // ── Probe position at drawing tip
+  if (drawProgress < 1) {
+    const rows = surf.uSegs + 1, cols = surf.vSegs + 1;
+    const totalSegs = rows * surf.vSegs;
+    const tipSeg = Math.min(totalSegs - 1, Math.floor(drawProgress * totalSegs));
+    const i = Math.floor(tipSeg / surf.vSegs);
+    const j = tipSeg % surf.vSegs;
+    const idx = (i * cols + j) * 3;
+    probe.position.set(posArr[idx], posArr[idx+1], posArr[idx+2]);
+    probe.position.applyEuler(lineGroup.rotation);
+    probeMat.opacity = 0.8 + Math.sin(T * 12) * 0.2;
+    glowRing.position.copy(probe.position);
+    glowRing.lookAt(camera.position);
+    glowRing.scale.setScalar(1 + Math.sin(T * 8) * 0.4);
+    glowMat.opacity = 0.2 + Math.sin(T * 8) * 0.1;
+  } else {
+    probeMat.opacity = Math.max(0, probeMat.opacity - dt * 2);
+    glowMat.opacity  = Math.max(0, glowMat.opacity  - dt * 2);
+  }
+
+  // ── Ripples
+  for (let i = ripples.length - 1; i >= 0; i--) {
+    const r = ripples[i];
+    r.userData.life += dt;
+    const p = r.userData.life / 1.5;
+    r.scale.setScalar(1 + p * 20);
+    r.material.opacity = 0.6 * (1 - p * p);
+    r.lookAt(camera.position);
+    if (p >= 1) { scene.remove(r); ripples.splice(i, 1); }
+  }
+
+  // ── Camera
+  camera.position.z = 90 + Math.sin(T * 0.15) * 4;
+  camera.lookAt(0, 0, 0);
+
+  renderer.render(scene, camera);
+}
+animate();
+
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
