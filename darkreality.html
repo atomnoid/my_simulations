@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DARK REALITY</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #000;
+    overflow: hidden;
+    font-family: 'Courier New', monospace;
+    cursor: crosshair;
+  }
+  canvas { display: block; }
+
+  #overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  /* scanlines */
+  #overlay::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.18) 2px,
+      rgba(0,0,0,0.18) 4px
+    );
+    pointer-events: none;
+  }
+
+  /* vignette */
+  #overlay::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.82) 100%);
+  }
+
+  #ui {
+    position: fixed;
+    top: 24px;
+    left: 28px;
+    z-index: 20;
+    pointer-events: none;
+  }
+
+  #ui .title {
+    font-size: 11px;
+    letter-spacing: 0.35em;
+    color: #888;
+    text-transform: uppercase;
+    line-height: 1.8;
+  }
+
+  #ui .val {
+    font-size: 10px;
+    color: #555;
+    letter-spacing: 0.2em;
+  }
+
+  #bottom {
+    position: fixed;
+    bottom: 24px;
+    right: 28px;
+    z-index: 20;
+    pointer-events: none;
+    text-align: right;
+  }
+
+  #bottom .label {
+    font-size: 9px;
+    letter-spacing: 0.3em;
+    color: #666;
+    text-transform: uppercase;
+  }
+
+  #coords {
+    position: fixed;
+    bottom: 24px;
+    left: 28px;
+    z-index: 20;
+    pointer-events: none;
+    font-size: 9px;
+    color: #555;
+    letter-spacing: 0.2em;
+  }
+</style>
+</head>
+<body>
+
+<div id="overlay"></div>
+
+<div id="ui">
+  <div class="title">DARK_REALITY.EXE</div>
+  <div class="val" id="frame-val">FRAME: 0000</div>
+  <div class="val" id="ent-val">ENTITIES: 000</div>
+</div>
+
+<div id="bottom">
+  <div class="label">SYS_ENTROPY_v0.91</div>
+</div>
+
+<div id="coords" id="coords-display">X: 0.000 | Y: 0.000 | Z: 0.000</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+  // SCENE SETUP
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x000000);
+  scene.fog = new THREE.FogExp2(0x000000, 0.018);
+
+  const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 200);
+  camera.position.set(0, 8, 28);
+  camera.lookAt(0, 0, 0);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: false });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.BasicShadowMap;
+  document.body.appendChild(renderer.domElement);
+
+  // MATERIALS
+  const wireMat = new THREE.MeshBasicMaterial({
+    color: 0x555555,
+    wireframe: true
+  });
+
+  const solidDark = new THREE.MeshLambertMaterial({ color: 0x2a2a2a });
+  const gridMat = new THREE.MeshBasicMaterial({ color: 0x2e2e2e, wireframe: true });
+
+  // LIGHTING — visible but still moody
+  const ambient = new THREE.AmbientLight(0xffffff, 0.25);
+  scene.add(ambient);
+
+  const dirLight = new THREE.DirectionalLight(0xaaaaaa, 1.4);
+  dirLight.position.set(10, 20, 10);
+  dirLight.castShadow = true;
+  scene.add(dirLight);
+
+  const rimLight = new THREE.DirectionalLight(0x666688, 0.8);
+  rimLight.position.set(-10, -5, -10);
+  scene.add(rimLight);
+
+  // Front fill — subtle, keeps geometry readable
+  const fillLight = new THREE.DirectionalLight(0x888888, 0.5);
+  fillLight.position.set(0, 5, 20);
+  scene.add(fillLight);
+
+  // GROUND GRID
+  const gridGeo = new THREE.PlaneGeometry(120, 120, 40, 40);
+  const grid = new THREE.Mesh(gridGeo, gridMat);
+  grid.rotation.x = -Math.PI / 2;
+  grid.position.y = -6;
+  scene.add(grid);
+
+  // PARTICLE FIELD — falling dots
+  const particleCount = 1800;
+  const positions = new Float32Array(particleCount * 3);
+  const velocities = [];
+
+  for (let i = 0; i < particleCount; i++) {
+    positions[i * 3]     = (Math.random() - 0.5) * 100;
+    positions[i * 3 + 1] = (Math.random() - 0.5) * 60;
+    positions[i * 3 + 2] = (Math.random() - 0.5) * 100;
+    velocities.push(0.02 + Math.random() * 0.04);
+  }
+
+  const particleGeo = new THREE.BufferGeometry();
+  particleGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  const particleMat = new THREE.PointsMaterial({ color: 0x666666, size: 0.28, sizeAttenuation: true });
+  const particles = new THREE.Points(particleGeo, particleMat);
+  scene.add(particles);
+
+  // CENTRAL STRUCTURE — fractured cube cluster
+  const cubeGroup = new THREE.Group();
+  const cubeData = [];
+
+  const baseMat = new THREE.MeshLambertMaterial({ color: 0x3a3a3a });
+  const wireMat2 = new THREE.MeshBasicMaterial({ color: 0x777777, wireframe: true });
+
+  for (let i = 0; i < 18; i++) {
+    const size = 0.4 + Math.random() * 1.8;
+    const geo = new THREE.BoxGeometry(size, size, size);
+    const mesh = new THREE.Mesh(geo, baseMat);
+    const wMesh = new THREE.Mesh(geo, wireMat2);
+
+    const spread = 6;
+    const x = (Math.random() - 0.5) * spread;
+    const y = (Math.random() - 0.5) * spread;
+    const z = (Math.random() - 0.5) * spread;
+
+    mesh.position.set(x, y, z);
+    wMesh.position.set(x, y, z);
+
+    const rx = Math.random() * Math.PI;
+    const ry = Math.random() * Math.PI;
+    mesh.rotation.set(rx, ry, 0);
+    wMesh.rotation.set(rx, ry, 0);
+
+    cubeGroup.add(mesh);
+    cubeGroup.add(wMesh);
+    cubeData.push({
+      mesh, wMesh,
+      rotSpeed: { x: (Math.random() - 0.5) * 0.003, y: (Math.random() - 0.5) * 0.004 },
+      floatOffset: Math.random() * Math.PI * 2,
+      floatSpeed: 0.3 + Math.random() * 0.4,
+      baseY: y
+    });
+  }
+  scene.add(cubeGroup);
+
+  // FLOATING LINES (like circuit traces)
+  const lineGroup = new THREE.Group();
+  for (let i = 0; i < 30; i++) {
+    const pts = [];
+    let cx = (Math.random() - 0.5) * 40;
+    let cy = (Math.random() - 0.5) * 20;
+    let cz = (Math.random() - 0.5) * 40;
+    pts.push(new THREE.Vector3(cx, cy, cz));
+    for (let j = 0; j < 3 + Math.floor(Math.random() * 4); j++) {
+      cx += (Math.random() - 0.5) * 8;
+      cy += (Math.random() - 0.5) * 2;
+      cz += (Math.random() - 0.5) * 8;
+      pts.push(new THREE.Vector3(cx, cy, cz));
+    }
+    const lineGeo = new THREE.BufferGeometry().setFromPoints(pts);
+    const lineMat = new THREE.LineBasicMaterial({ color: 0x444444 });
+    const line = new THREE.Line(lineGeo, lineMat);
+    lineGroup.add(line);
+  }
+  scene.add(lineGroup);
+
+  // LARGE BACKGROUND WIREFRAME SPHERE
+  const bgSphereGeo = new THREE.IcosahedronGeometry(35, 2);
+  const bgSphereMat = new THREE.MeshBasicMaterial({ color: 0x333333, wireframe: true });
+  const bgSphere = new THREE.Mesh(bgSphereGeo, bgSphereMat);
+  scene.add(bgSphere);
+
+  // TORN PLANE fragments
+  for (let i = 0; i < 12; i++) {
+    const w = 1 + Math.random() * 4;
+    const h = 0.5 + Math.random() * 3;
+    const planeGeo = new THREE.PlaneGeometry(w, h, 1, 1);
+    const planeMat = new THREE.MeshBasicMaterial({ color: 0x3a3a3a, wireframe: true, side: THREE.DoubleSide });
+    const plane = new THREE.Mesh(planeGeo, planeMat);
+    plane.position.set(
+      (Math.random() - 0.5) * 30,
+      (Math.random() - 0.5) * 15,
+      (Math.random() - 0.5) * 30
+    );
+    plane.rotation.set(
+      Math.random() * Math.PI,
+      Math.random() * Math.PI,
+      Math.random() * Math.PI
+    );
+    scene.add(plane);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  //  FULL 360° + 4-AXIS MOUSE CONTROL SYSTEM
+  //
+  //  LEFT DRAG   → Orbit  (360° horizontal, pole-clamped vertical)
+  //  RIGHT DRAG  → Pan    (slide target in world XY plane)
+  //  MIDDLE DRAG → Dolly  (push/pull along the look axis)
+  //  SCROLL      → Zoom   (exponential, smooth)
+  //  RELEASE     → Inertia / momentum coast
+  //
+  //  TOUCH:
+  //  1 finger    → Orbit
+  //  2 finger    → Pinch zoom + 2-finger pan
+  // ═══════════════════════════════════════════════════════════════════════
+
+  const O = {
+    // Current spherical coords
+    theta:  0.38,
+    phi:    1.05,
+    radius: 28,
+    target: new THREE.Vector3(0, 0, 0),
+
+    // Smooth targets
+    tTheta:  0.38,
+    tPhi:    1.05,
+    tRadius: 28,
+    tTarget: new THREE.Vector3(0, 0, 0),
+
+    // Inertia velocities (added to tTheta/tPhi each frame when not dragging)
+    vTheta: 0,
+    vPhi:   0,
+
+    // Settings
+    DAMP:       0.09,
+    INERTIA:    0.90,     // how long momentum lasts (0-1)
+    ORBIT_S:    0.007,
+    PAN_S:      0.024,
+    ZOOM_S:     0.11,
+    DOLLY_S:    0.18,
+    MIN_R:      2,
+    MAX_R:      110,
+    MIN_PHI:    0.03,
+    MAX_PHI:    Math.PI - 0.03,
+
+    // Drag state
+    down:   false,
+    btn:    -1,
+    lx:     0,
+    ly:     0,
+  };
+
+  const cvs = renderer.domElement;
+
+  // ── Mouse Down ────────────────────────────────────────────────────────────
+  cvs.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    O.down = true; O.btn = e.button;
+    O.lx = e.clientX; O.ly = e.clientY;
+    // kill inertia on new drag
+    O.vTheta = 0; O.vPhi = 0;
+    if      (e.button === 2) cvs.style.cursor = 'move';
+    else if (e.button === 1) cvs.style.cursor = 'ns-resize';
+    else                     cvs.style.cursor = 'grabbing';
+  });
+
+  // ── Mouse Move ────────────────────────────────────────────────────────────
+  window.addEventListener('mousemove', (e) => {
+    if (!O.down) return;
+    const dx = e.clientX - O.lx;
+    const dy = e.clientY - O.ly;
+    O.lx = e.clientX; O.ly = e.clientY;
+
+    if (O.btn === 0) {
+      // ── LEFT: full 360° orbit ──────────────────────────────────────────
+      const dT = -dx * O.ORBIT_S;
+      const dP = -dy * O.ORBIT_S;
+      O.tTheta += dT;
+      O.tPhi    = Math.max(O.MIN_PHI, Math.min(O.MAX_PHI, O.tPhi + dP));
+      // store velocity for inertia coast
+      O.vTheta = dT * 0.6;
+      O.vPhi   = dP * 0.6;
+
+    } else if (O.btn === 2) {
+      // ── RIGHT: pan (slide the orbit target in camera's local XY plane) ──
+      const forward = new THREE.Vector3();
+      camera.getWorldDirection(forward);
+      const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0,1,0)).normalize();
+      const up    = new THREE.Vector3().crossVectors(right, forward).normalize();
+      const scale = O.tRadius * O.PAN_S * 0.04;
+      O.tTarget.addScaledVector(right, -dx * scale);
+      O.tTarget.addScaledVector(up,     dy * scale);
+
+    } else if (O.btn === 1) {
+      // ── MIDDLE: dolly — move camera toward/away from target ─────────────
+      O.tRadius = Math.max(O.MIN_R, Math.min(O.MAX_R, O.tRadius - dy * O.DOLLY_S));
+    }
+  });
+
+  // ── Mouse Up ──────────────────────────────────────────────────────────────
+  window.addEventListener('mouseup', () => {
+    O.down = false; O.btn = -1;
+    cvs.style.cursor = 'crosshair';
+  });
+
+  // ── Scroll Wheel: zoom (exponential) ─────────────────────────────────────
+  cvs.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const dir = e.deltaY > 0 ? 1 : -1;
+    O.tRadius = Math.max(O.MIN_R, Math.min(O.MAX_R, O.tRadius * (1 + dir * O.ZOOM_S)));
+  }, { passive: false });
+
+  // ── Suppress context menu ─────────────────────────────────────────────────
+  cvs.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  // ── Touch Controls ────────────────────────────────────────────────────────
+  let prevT = [];
+  cvs.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    prevT = Array.from(e.touches);
+    O.vTheta = 0; O.vPhi = 0;
+  }, { passive: false });
+
+  cvs.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    const t = Array.from(e.touches);
+
+    if (t.length === 1 && prevT.length === 1) {
+      // 1-finger: orbit
+      const dx = t[0].clientX - prevT[0].clientX;
+      const dy = t[0].clientY - prevT[0].clientY;
+      O.vTheta = -dx * O.ORBIT_S * 0.6;
+      O.vPhi   = -dy * O.ORBIT_S * 0.6;
+      O.tTheta += -dx * O.ORBIT_S;
+      O.tPhi    = Math.max(O.MIN_PHI, Math.min(O.MAX_PHI, O.tPhi + -dy * O.ORBIT_S));
+
+    } else if (t.length === 2 && prevT.length === 2) {
+      // 2-finger: pinch zoom
+      const pD = Math.hypot(prevT[1].clientX - prevT[0].clientX, prevT[1].clientY - prevT[0].clientY);
+      const cD = Math.hypot(t[1].clientX - t[0].clientX,         t[1].clientY - t[0].clientY);
+      O.tRadius = Math.max(O.MIN_R, Math.min(O.MAX_R, O.tRadius * (pD / cD)));
+
+      // 2-finger: pan by centroid delta
+      const pmx = (prevT[0].clientX + prevT[1].clientX) / 2;
+      const pmy = (prevT[0].clientY + prevT[1].clientY) / 2;
+      const cmx = (t[0].clientX    + t[1].clientX)    / 2;
+      const cmy = (t[0].clientY    + t[1].clientY)    / 2;
+      const fdx = cmx - pmx, fdy = cmy - pmy;
+      const forward = new THREE.Vector3();
+      camera.getWorldDirection(forward);
+      const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0,1,0)).normalize();
+      const up    = new THREE.Vector3().crossVectors(right, forward).normalize();
+      const scale = O.tRadius * O.PAN_S * 0.04;
+      O.tTarget.addScaledVector(right, -fdx * scale);
+      O.tTarget.addScaledVector(up,     fdy * scale);
+    }
+
+    prevT = t;
+  }, { passive: false });
+
+  // ── Camera update (spherical coords → world position + inertia) ───────────
+  function updateCamera() {
+    if (!O.down) {
+      // coast with inertia
+      O.tTheta += O.vTheta;
+      O.tPhi    = Math.max(O.MIN_PHI, Math.min(O.MAX_PHI, O.tPhi + O.vPhi));
+      O.vTheta *= O.INERTIA;
+      O.vPhi   *= O.INERTIA;
+    }
+
+    // Smooth damp to targets
+    O.theta  += (O.tTheta  - O.theta)  * O.DAMP;
+    O.phi    += (O.tPhi    - O.phi)    * O.DAMP;
+    O.radius += (O.tRadius - O.radius) * O.DAMP;
+    O.target.lerp(O.tTarget, O.DAMP);
+
+    // Spherical → cartesian
+    const sP = Math.sin(O.phi), cP = Math.cos(O.phi);
+    camera.position.set(
+      O.target.x + O.radius * sP * Math.sin(O.theta),
+      O.target.y + O.radius * cP,
+      O.target.z + O.radius * sP * Math.cos(O.theta)
+    );
+    camera.lookAt(O.target);
+  }
+
+  // ── Control hint (fades after 6s) ─────────────────────────────────────────
+  const hint = document.createElement('div');
+  hint.style.cssText = `
+    position:fixed; bottom:50px; left:50%; transform:translateX(-50%);
+    z-index:30; pointer-events:none;
+    font-family:'Courier New',monospace; font-size:9px; color:#606060;
+    letter-spacing:0.22em; text-transform:uppercase; white-space:nowrap;
+    transition: opacity 2s ease;
+  `;
+  hint.innerHTML =
+    'L-DRAG: ORBIT &nbsp;·&nbsp; R-DRAG: PAN &nbsp;·&nbsp; M-DRAG: DOLLY &nbsp;·&nbsp; SCROLL: ZOOM';
+  document.body.appendChild(hint);
+  setTimeout(() => { hint.style.opacity = '0'; }, 6000);
+
+  // ── UI Elements ───────────────────────────────────────────────────────────
+  const frameVal = document.getElementById('frame-val');
+  const entVal   = document.getElementById('ent-val');
+  const coordsEl = document.getElementById('coords');
+
+  let frame = 0, time = 0;
+
+  // ── Main Loop ─────────────────────────────────────────────────────────────
+  function animate() {
+    requestAnimationFrame(animate);
+    time  += 0.008;
+    frame++;
+
+    updateCamera();
+
+    // Cube cluster gentle ambient tilt
+    cubeGroup.rotation.x = Math.sin(time * 0.25) * 0.04;
+
+    // Individual cubes: float + self-spin
+    cubeData.forEach((d) => {
+      d.mesh.rotation.x  += d.rotSpeed.x;
+      d.mesh.rotation.y  += d.rotSpeed.y;
+      d.wMesh.rotation.x  = d.mesh.rotation.x;
+      d.wMesh.rotation.y  = d.mesh.rotation.y;
+      d.mesh.position.y   = d.baseY + Math.sin(time * d.floatSpeed + d.floatOffset) * 0.3;
+      d.wMesh.position.y  = d.mesh.position.y;
+    });
+
+    // Particles fall
+    const pos = particleGeo.attributes.position.array;
+    for (let i = 0; i < particleCount; i++) {
+      pos[i * 3 + 1] -= velocities[i];
+      if (pos[i * 3 + 1] < -30) pos[i * 3 + 1] = 30;
+    }
+    particleGeo.attributes.position.needsUpdate = true;
+
+    // BG sphere drift
+    bgSphere.rotation.y += 0.0003;
+    bgSphere.rotation.x += 0.0001;
+
+    // Circuit lines slow orbit
+    lineGroup.rotation.y += 0.0004;
+
+    // Grid breathe
+    const gs = 1 + Math.sin(time * 0.5) * 0.005;
+    grid.scale.set(gs, 1, gs);
+
+    // UI readout at retro low-refresh
+    if (frame % 6 === 0) {
+      frameVal.textContent = `FRAME: ${String(frame).padStart(4, '0')}`;
+      entVal.textContent   = `ENTITIES: ${String(18 + Math.floor(Math.sin(time) * 2)).padStart(3, '0')}`;
+      if (coordsEl) {
+        const d2 = r => (r * 180 / Math.PI).toFixed(1);
+        coordsEl.textContent = `θ:${d2(O.theta)}°  φ:${d2(O.phi)}°  R:${O.radius.toFixed(1)}`;
+      }
+    }
+
+    renderer.render(scene, camera);
+  }
+
+  animate();
+
+  window.addEventListener('resize', () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+</script>
+</body>
+</html>
