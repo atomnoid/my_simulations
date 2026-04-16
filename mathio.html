@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>∞</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; overflow: hidden; cursor: none; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ── RENDERER ────────────────────────────────────────────────────
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('c'), antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setClearColor(0x000000);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 1000);
+camera.position.z = 60;
+
+// ── MOUSE STATE ──────────────────────────────────────────────────
+const mouse = { x: 0, y: 0, nx: 0.5, ny: 0.5, vx: 0, vy: 0, down: false, clicked: false };
+let prevX = 0, prevY = 0;
+
+document.addEventListener('mousemove', e => {
+  mouse.vx = e.clientX - prevX;
+  mouse.vy = e.clientY - prevY;
+  prevX = e.clientX; prevY = e.clientY;
+  mouse.x = (e.clientX / innerWidth  - 0.5) * 2;
+  mouse.y = (e.clientY / innerHeight - 0.5) * -2;
+  mouse.nx = e.clientX / innerWidth;
+  mouse.ny = e.clientY / innerHeight;
+});
+document.addEventListener('mousedown', () => { mouse.down = true; mouse.clicked = true; });
+document.addEventListener('mouseup',   () => { mouse.down = false; });
+document.addEventListener('wheel', e => { scrollInfluence += e.deltaY * 0.001; }, { passive: true });
+
+// ── GLOBAL VARS ──────────────────────────────────────────────────
+let scrollInfluence = 0;
+let hueShift = 0;
+const clock = new THREE.Clock();
+let t = 0;
+
+// ═══════════════════════════════════════════════════════════════
+// LAYER 1 — MAGNETIC PARTICLE FIELD (50k particles react to mouse)
+// ═══════════════════════════════════════════════════════════════
+const N = 50000;
+const geo1 = new THREE.BufferGeometry();
+const pos1  = new Float32Array(N * 3);
+const col1  = new Float32Array(N * 3);
+const vel1  = new Float32Array(N * 3);
+const base1 = new Float32Array(N * 3); // home position
+
+for (let i = 0; i < N; i++) {
+  // Arrange on a sphere surface
+  const theta = Math.random() * Math.PI * 2;
+  const phi   = Math.acos(2 * Math.random() - 1);
+  const r     = 25 + (Math.random() - 0.5) * 8;
+  const x = r * Math.sin(phi) * Math.cos(theta);
+  const y = r * Math.sin(phi) * Math.sin(theta);
+  const z = r * Math.cos(phi);
+  base1[i*3]=x; base1[i*3+1]=y; base1[i*3+2]=z;
+  pos1[i*3]=x;  pos1[i*3+1]=y;  pos1[i*3+2]=z;
+  col1[i*3]=1;  col1[i*3+1]=1;  col1[i*3+2]=1;
+}
+geo1.setAttribute('position', new THREE.BufferAttribute(pos1, 3));
+geo1.setAttribute('color',    new THREE.BufferAttribute(col1, 3));
+const mat1 = new THREE.PointsMaterial({ size: 0.12, vertexColors: true, transparent: true, opacity: 0.85, depthWrite: false, sizeAttenuation: true });
+const particles = new THREE.Points(geo1, mat1);
+scene.add(particles);
+
+// ═══════════════════════════════════════════════════════════════
+// LAYER 2 — SILK RIBBON SYSTEM (flowing curves that follow mouse)
+// ═══════════════════════════════════════════════════════════════
+const RIBBONS = 40;
+const RIBBON_SEGS = 80;
+const ribbonLines = [];
+const ribbonData = [];
+
+for (let r = 0; r < RIBBONS; r++) {
+  const pts = [];
+  for (let s = 0; s <= RIBBON_SEGS; s++) pts.push(new THREE.Vector3(0, 0, 0));
+  const rGeo = new THREE.BufferGeometry().setFromPoints(pts);
+  const hue  = r / RIBBONS;
+  const rMat = new THREE.LineBasicMaterial({
+    color: new THREE.Color().setHSL(hue, 1.0, 0.65),
+    transparent: true, opacity: 0.0, linewidth: 1,
+  });
+  const line = new THREE.Line(rGeo, rMat);
+  scene.add(line);
+  ribbonLines.push(line);
+  ribbonData.push({
+    angle: (r / RIBBONS) * Math.PI * 2,
+    radius: 8 + Math.random() * 20,
+    speed:  0.3 + Math.random() * 0.7,
+    phase:  Math.random() * Math.PI * 2,
+    trail:  Array.from({ length: RIBBON_SEGS + 1 }, () => new THREE.Vector3()),
+    head:   new THREE.Vector3(),
+    hue,
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// LAYER 3 — SACRED GEOMETRY RINGS (concentric rotating mandalas)
+// ═══════════════════════════════════════════════════════════════
+const mandalaGroup = new THREE.Group();
+scene.add(mandalaGroup);
+const mandalaRings = [];
+
+function makePolygonRing(n, radius, y = 0, color = 0xffffff) {
+  const pts = [];
+  for (let i = 0; i <= n; i++) {
+    const a = (i / n) * Math.PI * 2;
+    pts.push(new THREE.Vector3(Math.cos(a) * radius, Math.sin(a) * radius, y));
+  }
+  const g = new THREE.BufferGeometry().setFromPoints(pts);
+  const m = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.0 });
+  return new THREE.Line(g, m);
+}
+
+const geoRingConfigs = [
+  { n: 3,  r: 6  }, { n: 4,  r: 9  }, { n: 6,  r: 12 }, { n: 8,  r: 15 },
+  { n: 12, r: 18 }, { n: 16, r: 21 }, { n: 24, r: 24 }, { n: 36, r: 28 },
+  { n: 3,  r: 4  }, { n: 5,  r: 7  }, { n: 7,  r: 11 }, { n: 9,  r: 14 },
+  { n: 3,  r: 18 }, { n: 6,  r: 6  }, { n: 9,  r: 9  },
+];
+
+geoRingConfigs.forEach((cfg, i) => {
+  const hue = i / geoRingConfigs.length;
+  const line = makePolygonRing(cfg.n, cfg.r, 0, new THREE.Color().setHSL(hue, 1, 0.7));
+  line.userData = { speed: (i % 2 === 0 ? 1 : -1) * (0.2 + i * 0.04), baseOpacity: 0.3 + (i % 3) * 0.1 };
+  mandalaGroup.add(line);
+  mandalaRings.push(line);
+});
+
+// Star of David / flower of life connecting lines
+for (let i = 0; i < 6; i++) {
+  const a = (i / 6) * Math.PI * 2;
+  const pts = [
+    new THREE.Vector3(0, 0, 0),
+    new THREE.Vector3(Math.cos(a) * 28, Math.sin(a) * 28, 0),
+  ];
+  const g = new THREE.BufferGeometry().setFromPoints(pts);
+  const m = new THREE.LineBasicMaterial({ color: new THREE.Color().setHSL(i / 6, 1, 0.5), transparent: true, opacity: 0.0 });
+  const l = new THREE.Line(g, m);
+  l.userData = { spoke: true };
+  mandalaGroup.add(l);
+  mandalaRings.push(l);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// LAYER 4 — MOUSE CURSOR SHOCKWAVE RIPPLE SYSTEM
+// ═══════════════════════════════════════════════════════════════
+const ripples = [];
+const MAX_RIPPLES = 12;
+
+function spawnRipple(x, y, z) {
+  const geo = new THREE.RingGeometry(0.1, 0.18, 64);
+  const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, side: THREE.DoubleSide });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(x, y, z);
+  mesh.lookAt(camera.position);
+  mesh.userData = { life: 0, maxLife: 1.8 };
+  scene.add(mesh);
+  ripples.push(mesh);
+  if (ripples.length > MAX_RIPPLES) {
+    const old = ripples.shift();
+    scene.remove(old);
+    old.geometry.dispose();
+    old.material.dispose();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// LAYER 5 — LISSAJOUS WEB (mouse-driven frequency pattern)
+// ═══════════════════════════════════════════════════════════════
+const LISS_POINTS = 3000;
+const lissGeo = new THREE.BufferGeometry();
+const lissPos = new Float32Array(LISS_POINTS * 3);
+const lissCol = new Float32Array(LISS_POINTS * 3);
+lissGeo.setAttribute('position', new THREE.BufferAttribute(lissPos, 3));
+lissGeo.setAttribute('color',    new THREE.BufferAttribute(lissCol, 3));
+const lissMat = new THREE.PointsMaterial({ size: 0.18, vertexColors: true, transparent: true, opacity: 0.0, depthWrite: false });
+const lissPoints = new THREE.Points(lissGeo, lissMat);
+scene.add(lissPoints);
+
+// ── CURSOR MESH ──────────────────────────────────────────────────
+const cursorGeo = new THREE.RingGeometry(0.4, 0.55, 32);
+const cursorMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, side: THREE.DoubleSide });
+const cursorMesh = new THREE.Mesh(cursorGeo, cursorMat);
+scene.add(cursorMesh);
+
+const innerCursorGeo = new THREE.CircleGeometry(0.15, 32);
+const innerCursorMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 });
+const innerCursor = new THREE.Mesh(innerCursorGeo, innerCursorMat);
+scene.add(innerCursor);
+
+// ── RAYCASTING MOUSE → WORLD ─────────────────────────────────────
+const raycaster = new THREE.Raycaster();
+const mouseVec  = new THREE.Vector2();
+const worldMouse = new THREE.Vector3();
+const mousePlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+
+function updateWorldMouse() {
+  mouseVec.set(mouse.x, mouse.y);
+  raycaster.setFromCamera(mouseVec, camera);
+  raycaster.ray.intersectPlane(mousePlane, worldMouse);
+}
+
+// ── SPAWN ripple on click ─────────────────────────────────────────
+let rippleTimer = 0;
+
+// ─── ANIMATE ─────────────────────────────────────────────────────
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.04);
+  t += dt;
+  scrollInfluence *= 0.95;
+  hueShift = (hueShift + dt * 0.08) % 1;
+
+  updateWorldMouse();
+
+  // ── Cursor mesh
+  cursorMesh.position.lerp(worldMouse, 0.18);
+  cursorMesh.rotation.z = t * 2;
+  innerCursor.position.copy(worldMouse);
+  const speed = Math.sqrt(mouse.vx**2 + mouse.vy**2);
+  cursorMat.color.setHSL((hueShift + 0.5) % 1, 1, 0.7);
+  cursorMesh.scale.setScalar(1 + speed * 0.04);
+
+  // ── Auto ripple when moving fast
+  rippleTimer += dt;
+  if (speed > 8 && rippleTimer > 0.08) {
+    spawnRipple(worldMouse.x, worldMouse.y, 0);
+    rippleTimer = 0;
+  }
+  if (mouse.clicked) {
+    for (let i = 0; i < 4; i++) spawnRipple(worldMouse.x + (Math.random()-0.5)*3, worldMouse.y + (Math.random()-0.5)*3, 0);
+    mouse.clicked = false;
+  }
+
+  // ── Update ripples
+  ripples.forEach(r => {
+    r.userData.life += dt;
+    const p = r.userData.life / r.userData.maxLife;
+    const s = 1 + p * 28;
+    r.scale.setScalar(s);
+    r.material.opacity = Math.max(0, 0.8 * (1 - p * p));
+    r.material.color.setHSL((hueShift + p * 0.3) % 1, 1, 0.7);
+  });
+
+  // ═══ LAYER 1 — Particle field ════════════════════════════════
+  const pPos = geo1.attributes.position;
+  const pCol = geo1.attributes.color;
+  const mx3 = worldMouse.x, my3 = worldMouse.y;
+  const attract = mouse.down;
+
+  for (let i = 0; i < N; i++) {
+    let px = pPos.getX(i), py = pPos.getY(i), pz = pPos.getZ(i);
+
+    // Spring back to home
+    const hx = base1[i*3], hy = base1[i*3+1], hz = base1[i*3+2];
+
+    // Mouse repulsion / attraction
+    const dx = px - mx3, dy = py - my3;
+    const dist = Math.sqrt(dx*dx + dy*dy) + 0.01;
+    const force = attract ? -180 : 120;
+    const influence = Math.min(1, 14 / (dist * dist + 1));
+
+    vel1[i*3]   += (hx - px) * 0.025 + (dx / dist) * force * influence * dt;
+    vel1[i*3+1] += (hy - py) * 0.025 + (dy / dist) * force * influence * dt;
+    vel1[i*3+2] += (hz - pz) * 0.025;
+
+    vel1[i*3]   *= 0.88; vel1[i*3+1] *= 0.88; vel1[i*3+2] *= 0.88;
+
+    px += vel1[i*3] * dt; py += vel1[i*3+1] * dt; pz += vel1[i*3+2] * dt;
+    pPos.setXYZ(i, px, py, pz);
+
+    // Color by distance from mouse + hue shift
+    const distFromMouse = Math.sqrt((px-mx3)**2 + (py-my3)**2);
+    const h = (hueShift + distFromMouse * 0.015) % 1;
+    const l = 0.5 + Math.min(0.45, influence * 2);
+    const c = new THREE.Color().setHSL(h, 1.0, l);
+    pCol.setXYZ(i, c.r, c.g, c.b);
+  }
+  pPos.needsUpdate = true;
+  pCol.needsUpdate = true;
+  particles.rotation.y = t * 0.04 + mouse.x * 0.15;
+  particles.rotation.x = t * 0.02 - mouse.y * 0.08;
+
+  // ═══ LAYER 2 — Silk ribbons ══════════════════════════════════
+  ribbonData.forEach((rd, ri) => {
+    // Head orbits around mouse
+    const angleNow = rd.angle + t * rd.speed + scrollInfluence;
+    const rx = mouse.x * 30; const ry = mouse.y * 20;
+    const headX = rx + Math.cos(angleNow + mouse.x) * rd.radius;
+    const headY = ry + Math.sin(angleNow * 0.7 + rd.phase + mouse.y) * rd.radius * 0.6;
+    const headZ = Math.sin(angleNow * 0.5 + rd.phase) * 10;
+
+    rd.head.set(headX, headY, headZ);
+
+    // Shift trail
+    for (let s = RIBBON_SEGS; s > 0; s--) rd.trail[s].copy(rd.trail[s-1]);
+    rd.trail[0].copy(rd.head);
+
+    // Update geometry
+    const rPos = ribbonLines[ri].geometry.attributes.position;
+    rd.trail.forEach((p, si) => rPos.setXYZ(si, p.x, p.y, p.z));
+    rPos.needsUpdate = true;
+
+    // Pulsing opacity
+    const h = (rd.hue + hueShift) % 1;
+    ribbonLines[ri].material.color.setHSL(h, 1.0, 0.65);
+    ribbonLines[ri].material.opacity = 0.25 + Math.abs(Math.sin(t * rd.speed + ri)) * 0.45;
+  });
+
+  // ═══ LAYER 3 — Sacred geometry mandala ══════════════════════
+  mandalaGroup.rotation.z = t * 0.06 + mouse.x * 0.3;
+  mandalaGroup.rotation.x = mouse.y * 0.2;
+  mandalaGroup.scale.setScalar(1 + Math.sin(t * 0.5) * 0.08 + speed * 0.002);
+
+  mandalaRings.forEach((ring, i) => {
+    if (ring.userData.spoke) {
+      ring.material.opacity = 0.12 + Math.abs(Math.sin(t * 0.3 + i)) * 0.18;
+      ring.material.color.setHSL((hueShift + i * 0.1) % 1, 1, 0.5);
+    } else {
+      ring.rotation.z += ring.userData.speed * dt * (mouse.down ? 4 : 1);
+      const pulse = Math.abs(Math.sin(t * 0.8 + i * 0.4)) * 0.3;
+      ring.material.opacity = ring.userData.baseOpacity + pulse;
+      ring.material.color.setHSL((hueShift + i / geoRingConfigs.length + t * 0.05) % 1, 1.0, 0.65);
+    }
+  });
+
+  // ═══ LAYER 5 — Lissajous web ════════════════════════════════
+  // Frequencies driven by mouse position
+  const freqA = 1 + mouse.nx * 6;
+  const freqB = 1 + mouse.ny * 6;
+  const delta  = t * 0.3 + scrollInfluence;
+  for (let i = 0; i < LISS_POINTS; i++) {
+    const frac = i / LISS_POINTS;
+    const angle = frac * Math.PI * 2 * 6;
+    const x = Math.sin(freqA * angle + delta) * 30 + Math.sin(freqA * 0.5 * angle) * 8;
+    const y = Math.cos(freqB * angle) * 20 + Math.cos(freqB * 0.5 * angle + delta * 0.7) * 8;
+    const z = Math.sin((freqA + freqB) * 0.5 * angle + delta * 0.5) * 10;
+    lissPos[i*3] = x; lissPos[i*3+1] = y; lissPos[i*3+2] = z;
+
+    const h = (hueShift + frac + t * 0.1) % 1;
+    const c = new THREE.Color().setHSL(h, 1.0, 0.65);
+    lissCol[i*3]=c.r; lissCol[i*3+1]=c.g; lissCol[i*3+2]=c.b;
+  }
+  lissGeo.attributes.position.needsUpdate = true;
+  lissGeo.attributes.color.needsUpdate = true;
+  lissMat.opacity = 0.5 + Math.sin(t * 0.7) * 0.2;
+
+  // ── Camera breathing
+  camera.position.z = 60 + Math.sin(t * 0.2) * 5 + scrollInfluence * 8;
+  camera.rotation.z = Math.sin(t * 0.07) * 0.015;
+
+  renderer.render(scene, camera);
+}
+animate();
+
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
