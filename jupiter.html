@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Celestial</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; overflow: hidden; width: 100vw; height: 100vh; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 1000);
+camera.position.set(0, 2.5, 7);
+camera.lookAt(0, 0, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(devicePixelRatio);
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+// ── Stars ──────────────────────────────────────────────────────────────────
+const starGeo = new THREE.BufferGeometry();
+const starCount = 3200;
+const starPos = new Float32Array(starCount * 3);
+const starSizes = new Float32Array(starCount);
+for (let i = 0; i < starCount; i++) {
+  const r = 200 + Math.random() * 300;
+  const theta = Math.random() * Math.PI * 2;
+  const phi = Math.acos(2 * Math.random() - 1);
+  starPos[i * 3]     = r * Math.sin(phi) * Math.cos(theta);
+  starPos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+  starPos[i * 3 + 2] = r * Math.cos(phi);
+  starSizes[i] = Math.random() * 1.8 + 0.4;
+}
+starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+starGeo.setAttribute('size', new THREE.BufferAttribute(starSizes, 1));
+
+const starMat = new THREE.ShaderMaterial({
+  uniforms: { color: { value: new THREE.Color(1, 1, 1) } },
+  vertexShader: `
+    attribute float size;
+    void main() {
+      gl_PointSize = size;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: `
+    uniform vec3 color;
+    void main() {
+      float d = length(gl_PointCoord - vec2(0.5));
+      if (d > 0.5) discard;
+      float a = 1.0 - smoothstep(0.2, 0.5, d);
+      gl_FragColor = vec4(color, a * 0.85);
+    }
+  `,
+  transparent: true,
+  depthWrite: false,
+});
+scene.add(new THREE.Points(starGeo, starMat));
+
+// ── Lighting ───────────────────────────────────────────────────────────────
+const sun = new THREE.DirectionalLight(0xfff4e0, 2.4);
+sun.position.set(8, 4, 6);
+sun.castShadow = true;
+scene.add(sun);
+scene.add(new THREE.AmbientLight(0x1a0d04, 0.6));
+
+// ── Planet texture (procedural canvas) ────────────────────────────────────
+function makePlanetTexture() {
+  const size = 1024;
+  const canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+
+  const bg = ctx.createRadialGradient(size*.5, size*.5, 0, size*.5, size*.5, size*.5);
+  bg.addColorStop(0,    '#fff8e1');
+  bg.addColorStop(0.08, '#f5d98a');
+  bg.addColorStop(0.22, '#d4a03a');
+  bg.addColorStop(0.50, '#9a6020');
+  bg.addColorStop(0.80, '#5c3410');
+  bg.addColorStop(1.0,  '#1a0d04');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, size, size);
+
+  const bands = [
+    { y: 0.18, h: 0.06, color: 'rgba(220,160,60,0.28)' },
+    { y: 0.28, h: 0.04, color: 'rgba(100,50,15,0.22)' },
+    { y: 0.36, h: 0.08, color: 'rgba(200,140,50,0.20)' },
+    { y: 0.50, h: 0.05, color: 'rgba(80,40,12,0.25)' },
+    { y: 0.60, h: 0.07, color: 'rgba(200,130,45,0.18)' },
+    { y: 0.72, h: 0.04, color: 'rgba(110,58,18,0.22)' },
+    { y: 0.80, h: 0.06, color: 'rgba(190,120,40,0.16)' },
+  ];
+  bands.forEach(b => {
+    ctx.save();
+    for (let x = 0; x < size; x += 4) {
+      const yOff = (Math.random() - 0.5) * size * 0.012;
+      const hNoise = size * b.h * (0.85 + Math.random() * 0.3);
+      ctx.fillStyle = b.color;
+      ctx.fillRect(x, b.y * size + yOff, 4, hNoise);
+    }
+    ctx.restore();
+  });
+
+  // vortex hint near equator
+  ctx.save();
+  ctx.globalAlpha = 0.14;
+  for (let i = 0; i < 6; i++) {
+    const gx = size * (0.3 + Math.random() * 0.4);
+    const gy = size * (0.38 + Math.random() * 0.24);
+    const r = size * (0.03 + Math.random() * 0.05);
+    const g = ctx.createRadialGradient(gx, gy, 0, gx, gy, r);
+    g.addColorStop(0, '#fffbe0');
+    g.addColorStop(1, 'transparent');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(gx, gy, r, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
+
+  return new THREE.CanvasTexture(canvas);
+}
+
+// ── Planet ─────────────────────────────────────────────────────────────────
+const planetGeo = new THREE.SphereGeometry(1.2, 96, 96);
+const planetMat = new THREE.MeshStandardMaterial({
+  map: makePlanetTexture(),
+  roughness: 0.72,
+  metalness: 0.05,
+});
+const planet = new THREE.Mesh(planetGeo, planetMat);
+planet.castShadow = true;
+planet.receiveShadow = true;
+scene.add(planet);
+
+// ── Atmosphere haze ────────────────────────────────────────────────────────
+const atmGeo = new THREE.SphereGeometry(1.26, 64, 64);
+const atmMat = new THREE.ShaderMaterial({
+  uniforms: {
+    glowColor: { value: new THREE.Color(0.78, 0.58, 0.22) },
+    viewVector: { value: camera.position },
+  },
+  vertexShader: `
+    uniform vec3 viewVector;
+    varying float intensity;
+    void main() {
+      vec3 vNormal = normalize(normalMatrix * normal);
+      vec3 vView = normalize(viewVector - (modelMatrix * vec4(position,1.0)).xyz);
+      intensity = pow(1.0 - abs(dot(vNormal, vView)), 3.5);
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
+    }
+  `,
+  fragmentShader: `
+    uniform vec3 glowColor;
+    varying float intensity;
+    void main() {
+      gl_FragColor = vec4(glowColor * intensity, intensity * 0.55);
+    }
+  `,
+  side: THREE.FrontSide,
+  blending: THREE.AdditiveBlending,
+  transparent: true,
+  depthWrite: false,
+});
+scene.add(new THREE.Mesh(atmGeo, atmMat));
+
+// ── Ring system ────────────────────────────────────────────────────────────
+function makeRingTexture(innerR, outerR, color1, color2, opacity) {
+  const size = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = 1;
+  const ctx = canvas.getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, size, 0);
+  grad.addColorStop(0,    'rgba(0,0,0,0)');
+  grad.addColorStop(0.15, `rgba(${color1},${opacity * 0.5})`);
+  grad.addColorStop(0.35, `rgba(${color2},${opacity})`);
+  grad.addColorStop(0.50, `rgba(${color2},${opacity * 1.2})`);
+  grad.addColorStop(0.65, `rgba(${color2},${opacity})`);
+  grad.addColorStop(0.85, `rgba(${color1},${opacity * 0.5})`);
+  grad.addColorStop(1,    'rgba(0,0,0,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, 1);
+  return new THREE.CanvasTexture(canvas);
+}
+
+const rings = [
+  { inner: 1.55, outer: 1.85, c1: '196,151,58', c2: '232,213,163', op: 0.65 },
+  { inner: 1.90, outer: 2.22, c1: '140,90,30',  c2: '196,151,58',  op: 0.50 },
+  { inner: 2.28, outer: 2.58, c1: '80,48,14',   c2: '140,90,30',   op: 0.38 },
+];
+
+const ringGroup = new THREE.Group();
+ringGroup.rotation.x = Math.PI / 2 - 0.42;
+scene.add(ringGroup);
+
+rings.forEach(r => {
+  const geo = new THREE.RingGeometry(r.inner, r.outer, 256, 1);
+  const uv = geo.attributes.uv;
+  for (let i = 0; i < uv.count; i++) {
+    const u = uv.getX(i);
+    uv.setX(i, u);
+  }
+  const mat = new THREE.MeshBasicMaterial({
+    map: makeRingTexture(r.inner, r.outer, r.c1, r.c2, r.op),
+    side: THREE.DoubleSide,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.NormalBlending,
+  });
+  ringGroup.add(new THREE.Mesh(geo, mat));
+});
+
+// ── Moon ───────────────────────────────────────────────────────────────────
+function makeMoonTexture() {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const bg = ctx.createRadialGradient(size*.5, size*.5, 0, size*.5, size*.5, size*.5);
+  bg.addColorStop(0,   '#d4d0c8');
+  bg.addColorStop(0.6, '#9a9488');
+  bg.addColorStop(1,   '#4a4540');
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, size, size);
+  ctx.globalAlpha = 0.18;
+  for (let i = 0; i < 22; i++) {
+    const x = Math.random() * size, y = Math.random() * size;
+    const r = size * (0.015 + Math.random() * 0.04);
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = '#2a2520'; ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  return new THREE.CanvasTexture(canvas);
+}
+
+const moonOrbit = new THREE.Group();
+scene.add(moonOrbit);
+const moonGeo = new THREE.SphereGeometry(0.18, 48, 48);
+const moonMat = new THREE.MeshStandardMaterial({
+  map: makeMoonTexture(),
+  roughness: 0.9,
+  metalness: 0,
+});
+const moon = new THREE.Mesh(moonGeo, moonMat);
+moon.position.set(2.9, 0.85, 0);
+moon.castShadow = true;
+moonOrbit.add(moon);
+
+// ── Mouse drag to rotate ───────────────────────────────────────────────────
+let isDragging = false, prevX = 0, prevY = 0;
+let rotY = 0, rotX = 0.28;
+
+renderer.domElement.addEventListener('mousedown', e => { isDragging = true; prevX = e.clientX; prevY = e.clientY; });
+renderer.domElement.addEventListener('touchstart', e => { isDragging = true; prevX = e.touches[0].clientX; prevY = e.touches[0].clientY; });
+window.addEventListener('mouseup', () => isDragging = false);
+window.addEventListener('touchend', () => isDragging = false);
+
+window.addEventListener('mousemove', e => {
+  if (!isDragging) return;
+  rotY += (e.clientX - prevX) * 0.004;
+  rotX += (e.clientY - prevY) * 0.004;
+  rotX = Math.max(-0.9, Math.min(0.9, rotX));
+  prevX = e.clientX; prevY = e.clientY;
+});
+window.addEventListener('touchmove', e => {
+  if (!isDragging) return;
+  rotY += (e.touches[0].clientX - prevX) * 0.004;
+  prevX = e.touches[0].clientX; prevY = e.touches[0].clientY;
+});
+
+// scroll zoom
+window.addEventListener('wheel', e => {
+  camera.position.z = Math.max(3.5, Math.min(14, camera.position.z + e.deltaY * 0.01));
+});
+
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// ── Animate ────────────────────────────────────────────────────────────────
+const clock = new THREE.Clock();
+const pivot = new THREE.Group();
+scene.add(pivot);
+pivot.add(planet);
+
+function animate() {
+  requestAnimationFrame(animate);
+  const t = clock.getElapsedTime();
+
+  planet.rotation.y = t * 0.09;
+
+  // auto slow drift + user drag
+  const targetRotY = rotY + t * 0.04;
+  pivot.rotation.y = targetRotY;
+  pivot.rotation.x = rotX;
+  ringGroup.rotation.y = targetRotY;
+  ringGroup.rotation.x = (Math.PI / 2 - 0.42) * Math.cos(rotX) + rotX * 0.2;
+
+  moonOrbit.rotation.y = t * 0.22;
+  moonOrbit.rotation.x = rotX * 0.3;
+
+  atmMat.uniforms.viewVector.value.copy(camera.position);
+
+  renderer.render(scene, camera);
+}
+animate();
+</script>
+</body>
+</html>
